@@ -9,6 +9,7 @@ use aiken/crypto.{VerificationKeyHash}
 use cardano/address.{Credential}
 use cardano/assets.{AssetName, PolicyId, Value, ada_policy_id, flatten}
 use cardano/transaction.{InlineDatum, Input, Output}
+use env
 
 pub type Tokens =
   Dict<AssetName, Int>
@@ -146,11 +147,15 @@ pub fn has_key(haystack: List<Pair<Credential, a>>, needle: Credential) -> Bool 
   head_list(haystack).1st == needle || has_key(tail_list(haystack), needle)
 }
 
-/// A faster version of assets.merge that is specialized to positive values
-/// (typically found in outputs). This allows to bypass the null check on value
-/// since quantities can only ever increase.
+/// A faster version of assets.merge that preserves empty maps. This allows to
+/// bypass the null check on value since quantities can only ever increase.
+/// Importantly, it is also *necessary* to ensure that policies are retained in
+/// the map for later validations even if they result in no outputs (e.g. a burn
+/// fully compensate a spend).
 ///
-/// The function handles recurses over a list or input-like objects, and let the
+/// It also focuses on assets and completely ignores Ada.
+///
+/// The function recurses over a list or input-like objects, and let the
 /// caller select whether to add an output or not.
 ///
 /// ## Example
@@ -168,14 +173,22 @@ pub fn has_key(haystack: List<Pair<Credential, a>>, needle: Credential) -> Bool 
 ///   },
 /// )
 /// ```
-pub fn sum_output_values(
+///
+/// /!\ PRE-CONDITION /!\
+/// The given zero value is not expected to contain any Ada. This is enforced
+/// when assertions are enabled (`--env with_assertions`).
+///
+/// This is generally true when the initial zero is empty or coming from the
+/// mint value.
+pub fn sum_output_assets(
   elems: List<i>,
+  zero: RawValue,
   strategy: fn(i, fn(Output) -> RawValue, fn() -> RawValue) -> RawValue,
 ) -> RawValue {
-  do_sum_output_values(elems, strategy, dict.empty)
+  do_sum_output_assets(elems, strategy, env.assert_no_ada_policy(zero))
 }
 
-fn do_sum_output_values(
+fn do_sum_output_assets(
   elems: List<i>,
   strategy: fn(i, fn(Output) -> RawValue, fn() -> RawValue) -> RawValue,
   sum: RawValue,
@@ -183,7 +196,7 @@ fn do_sum_output_values(
   when elems is {
     [] -> sum
     [head, ..tail] ->
-      do_sum_output_values(
+      do_sum_output_assets(
         tail,
         strategy,
         strategy(
@@ -192,7 +205,8 @@ fn do_sum_output_values(
           fn(output) {
             output.value
               |> assets.to_dict
-              |> merge_raw_values(sum, _)
+              |> dict.delete(ada_policy_id)
+              |> merge_raw_values(sum)
           },
           // Output is discarded
           fn() { sum },
@@ -207,6 +221,12 @@ pub fn merge_raw_values(left: RawValue, right: RawValue) -> RawValue {
   dict.union_with(
     left,
     right,
+    // NOTE: Preserving null assets
+    // It is primordial here to not discard assets if even they result in an
+    // empty set. This is because the zero value may have negative quantities
+    // coming from burns. If a burn is fully cover by a spend, we must preserve
+    // the key in the map to ensure that validations necessary to that policy
+    // occur as expected.
     fn(_policy, left, right, keep, _discard) {
       keep(dict.union_with(left, right, dict_strategy.sum()))
     },

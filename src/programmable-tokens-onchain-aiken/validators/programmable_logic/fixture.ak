@@ -290,7 +290,7 @@ pub fn some_transfer(
           [],
           fn(_, node_idx, proofs) { [TokenExists { node_idx }, ..proofs] },
         )
-      |> fn(proofs) { TransferAct { proofs, mint_proofs: [] } },
+      |> TransferAct,
   )
 }
 

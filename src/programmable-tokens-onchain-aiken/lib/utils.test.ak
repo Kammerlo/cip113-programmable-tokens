@@ -1,12 +1,14 @@
 //// Unit tests for utility functions
 
 use aiken/collection/dict.{Dict}
+use cardano/address.{from_verification_key}
 use cardano/assets.{
   AssetName, PolicyId, ada_asset_name, ada_policy_id, add, from_asset, zero,
 }
+use cardano/transaction.{NoDatum, Output}
 use utils.{
   bytearray_lt, count_unique_tokens, has_currency_symbol, has_signatory,
-  value_contains,
+  sum_output_assets, value_contains,
 }
 
 // Test bytearray_lt with different bytearrays
@@ -139,4 +141,76 @@ test has_signatory_absent() fail {
   let vkh1 = #"aabbccdd"
   let vkh2 = #"ddeeff00"
   has_signatory([vkh1], vkh2)
+}
+
+const output_placeholder =
+  Output {
+    address: from_verification_key(
+      #"00000000000000000000000000000000000000000000000000000000",
+    ),
+    value: assets.zero,
+    datum: NoDatum,
+    reference_script: None,
+  }
+
+test sum_output_assets_many_assets() {
+  let out1 =
+    Output {
+      ..output_placeholder,
+      value: assets.zero
+        |> assets.add("", "", 42)
+        |> assets.add("foo", "bar", 1),
+    }
+
+  let out2 =
+    Output {
+      ..output_placeholder,
+      value: assets.zero
+        |> assets.add("", "", 1337)
+        |> assets.add("foo", "bar", 1)
+        |> assets.add("baz", "", 1),
+    }
+
+  let out3 =
+    Output {
+      ..output_placeholder,
+      value: assets.zero
+        |> assets.add("", "", 14)
+        |> assets.add("bar", "foo", 1),
+    }
+
+  let expected =
+    assets.zero
+      |> assets.add("bar", "foo", 1)
+      |> assets.add("baz", "", 1)
+      |> assets.add("foo", "bar", 2)
+      |> assets.to_dict
+
+  sum_output_assets(
+    [out1, out2, out3],
+    dict.empty,
+    fn(o, keep, _discard) { keep(o) },
+  ) == expected
+}
+
+test sum_output_assets_mixed_mint_and_output() {
+  let mint =
+    assets.zero
+      |> assets.add("foo", "bar", 1)
+      |> assets.to_dict
+
+  let output_value =
+    Output {
+      ..output_placeholder,
+      value: assets.zero
+        |> assets.add("", "", 1337)
+        |> assets.add("foo", "bar", 1),
+    }
+
+  let expected =
+    assets.zero
+      |> assets.add("foo", "bar", 2)
+      |> assets.to_dict
+
+  sum_output_assets([output_value], mint, fn(o, keep, _discard) { keep(o) }) == expected
 }

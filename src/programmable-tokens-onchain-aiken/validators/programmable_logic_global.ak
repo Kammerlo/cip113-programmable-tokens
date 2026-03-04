@@ -14,8 +14,7 @@ use types.{
 }
 use utils.{
   RawValue, Tokens, bytearray_lt, elem_at, has_currency_symbol, has_key,
-  has_signatory, merge_raw_values, skip_assert, split_at, sum_output_values,
-  union_tokens,
+  has_signatory, skip_assert, split_at, sum_output_assets, union_tokens,
 }
 
 validator programmable_logic_global(protocol_params_cs: PolicyId) {
@@ -35,14 +34,8 @@ validator programmable_logic_global(protocol_params_cs: PolicyId) {
     <- expect_programmable_logic_params(protocol_params_ref.output.datum)
 
     when redeemer is {
-      TransferAct { proofs, mint_proofs } ->
-        validate_transfer(
-          self,
-          prog_logic_cred,
-          registry_node_cs,
-          proofs,
-          mint_proofs,
-        )
+      TransferAct { proofs } ->
+        validate_transfer(self, prog_logic_cred, registry_node_cs, proofs)
       ThirdPartyAct {
         registry_node_idx,
         input_idxs,
@@ -84,37 +77,22 @@ fn validate_transfer(
   prog_logic_cred: Credential,
   registry_node_cs: PolicyId,
   proofs: List<RegistryProof>,
-  mint_proofs: List<RegistryProof>,
 ) -> Bool {
-  // Sum all inputs from the programmable logic credential
-  let total_prog_value: RawValue = get_signed_prog_value(self, prog_logic_cred)
+  // Collect all programmable tokens across inputs and minted/burned values.
+  let total_input_value: RawValue = get_signed_prog_value(self, prog_logic_cred)
 
-  // Check transfer logic for each programmable token type and filter to only programmable tokens
-  let validated_prog_value =
+  // Check transfer logic for each programmable token type and filter to only programmable tokens.
+  let input_prog_value =
     check_transfer_and_compute_prog_value(
-      total_prog_value,
+      total_input_value,
       proofs,
       validate_single_cs(self, _, _, registry_node_cs),
     )
 
-  // Always validate minted/burned programmable tokens against the directory.
-  // Gate on tx.mint content (not mint_proofs), matching Plutarch behavior.
-  // If self.mint is empty and mint_proofs is empty: no-op (returns dict.empty, merge is identity).
-  // If self.mint is non-empty but mint_proofs is empty: crashes on head_list([]) → tx rejected.
-  // If self.mint is empty but mint_proofs is non-empty: remaining_proofs != [] → tx rejected.
-  let mint_dict: RawValue = assets.to_dict(self.mint)
-  let validated_mint_value =
-    check_mint_and_compute_prog_value(
-      mint_dict,
-      mint_proofs,
-      validate_single_cs(self, _, _, registry_node_cs),
-    )
-  let expected_value =
-    merge_raw_values(validated_prog_value, validated_mint_value)
-
   let output_prog_value: RawValue =
-    sum_output_values(
+    sum_output_assets(
       self.outputs,
+      dict.empty,
       fn(output, select, discard) {
         if output.address.payment_credential == prog_logic_cred {
           expect Some(Inline(_stake_cred)) = output.address.stake_credential
@@ -129,7 +107,7 @@ fn validate_transfer(
   // Pre-condition of 'value_contains' is guaranteed since both pairs
   // come from 'Dict', thus guaranteeing key uniqueness and ordering.
   dict.to_pairs(output_prog_value)
-    |> utils.value_contains(dict.to_pairs(expected_value))
+    |> utils.value_contains(dict.to_pairs(input_prog_value))
 }
 
 fn validate_3rd_party(
@@ -405,8 +383,9 @@ fn get_signed_prog_value(
   tx: Transaction,
   prog_logic_cred: Credential,
 ) -> RawValue {
-  sum_output_values(
+  sum_output_assets(
     tx.inputs,
+    assets.to_dict(tx.mint),
     fn(input, select, discard) {
       let output = input.output
       if output.address.payment_credential == prog_logic_cred {
@@ -438,7 +417,7 @@ fn check_transfer_and_compute_prog_value(
   proofs: List<RegistryProof>,
   check_policy: fn(PolicyId, RegistryProof) -> Bool,
 ) -> RawValue {
-  let assets = tail_list(dict.to_pairs(value))
+  let assets = dict.to_pairs(value)
 
   let
     remaining_proofs,
@@ -489,26 +468,6 @@ fn do_check_transfer(
       do_check_transfer(rest, tail_list(proofs), check_policy, new_acc, return)
     }
   }
-}
-
-/// Validate minted/burned programmable tokens and filter to only programmable tokens.
-/// Unlike check_transfer_and_compute_prog_value, this does NOT skip ADA
-/// (mint values never contain ADA).
-fn check_mint_and_compute_prog_value(
-  mint_value: RawValue,
-  mint_proofs: List<RegistryProof>,
-  check_policy: fn(PolicyId, RegistryProof) -> Bool,
-) -> RawValue {
-  let mint_assets = dict.to_pairs(mint_value)
-
-  let
-    remaining_proofs,
-    acc_value,
-  <- do_check_transfer(mint_assets, mint_proofs, check_policy, dict.empty)
-
-  expect [] == remaining_proofs
-
-  acc_value
 }
 
 /// Validate a single currency symbol against its proof
