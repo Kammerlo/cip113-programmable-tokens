@@ -7,8 +7,8 @@ use aiken/collection/dict/strategy as dict_strategy
 use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash}
 use cardano/address.{Credential}
-use cardano/assets.{AssetName, PolicyId, Value, ada_policy_id, flatten}
-use cardano/transaction.{InlineDatum, Input, Output}
+use cardano/assets.{AssetName, PolicyId, Value, flatten}
+use cardano/transaction.{InlineDatum, Output}
 use env
 
 pub type Tokens =
@@ -21,25 +21,6 @@ pub type RawValue =
 pub fn expect_inline_datum(output: Output) -> Data {
   expect InlineDatum(d) = output.datum
   d
-}
-
-/// Find an input by a predicate
-pub fn find_input(
-  inputs: List<Input>,
-  predicate: fn(Input) -> Bool,
-) -> Option<Input> {
-  list.find(inputs, predicate)
-}
-
-/// Must find an input by predicate (fails if not found)
-pub fn must_find_input(
-  inputs: List<Input>,
-  predicate: fn(Input) -> Bool,
-) -> Input {
-  when find_input(inputs, predicate) is {
-    Some(input) -> input
-    None -> fail @"Required input not found"
-  }
 }
 
 /// Check if a currency symbol is present in a value. Fail loudly if missing
@@ -276,23 +257,6 @@ fn do_insert_with(
         }
       }
   }
-}
-
-/// Compare two 'RawValue' to check if they have matchings assets.
-pub fn match_assets(left: RawValue, right: RawValue) -> Bool {
-  let without_lovelace =
-    fn(pairs: Pairs<PolicyId, Dict<AssetName, Int>>) {
-      if head_list(pairs).1st == ada_policy_id {
-        tail_list(pairs)
-      } else {
-        pairs
-      }
-    }
-
-  let left_assets = without_lovelace(dict.to_pairs(left))
-  let right_assets = without_lovelace(dict.to_pairs(right))
-
-  left_assets == right_assets
 }
 
 /// /!\ PRE-CONDITION /!\
