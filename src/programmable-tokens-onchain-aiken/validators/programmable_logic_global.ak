@@ -13,9 +13,9 @@ use types.{
   TokenDoesNotExist, TokenExists, TransferAct,
 }
 use utils.{
-  RawValue, Tokens, bytearray_lt, drop_until, elem_at, has_currency_symbol,
-  has_key, has_signatory, skip_assert, split_at, sum_output_assets,
-  tokens_contains, union_tokens,
+  RawValue, Tokens, bytearray_lt, drop_until, elem_at, has_key, has_signatory,
+  peek_first_asset, skip_assert, split_at, sum_output_assets, tokens_contains,
+  union_tokens,
 }
 
 validator programmable_logic_global(protocol_params_cs: PolicyId) {
@@ -65,7 +65,7 @@ pub fn get_protocol_params_ref(
   ref_inputs: List<Input>,
 ) -> Input {
   let head = head_list(ref_inputs)
-  if has_currency_symbol(head.output.value, protocol_params_cs) {
+  if peek_first_asset(head.output.value).1st == protocol_params_cs {
     head
   } else {
     get_protocol_params_ref(protocol_params_cs, tail_list(ref_inputs))
@@ -98,29 +98,30 @@ fn validate_transfer(
       },
     )
 
+  let get_registry_node =
+    mk_get_registry_node(
+      registry_node_cs,
+      0,
+      self.reference_inputs,
+      fn(_) { fail },
+    )
+
+  let first_withdrawal = head_list(self.withdrawals).1st
   let has_withdrawal =
     mk_has_withdrawal(
-      fn(script_hash) { script_hash == head_list(self.withdrawals).1st },
+      fn(script_hash) { script_hash == first_withdrawal },
       // NOTE: The programmable logic global is alway invoked via a withdrawal, so
       // we know there's AT LEAST ONE withdrawal.
       tail_list(self.withdrawals),
     )
 
-  let get_registry_node =
-    fn(node_idx) {
-      let reference_input = elem_at(self.reference_inputs, node_idx)
-      expect InlineDatum(data) = reference_input.output.datum
-      expect has_currency_symbol(reference_input.output.value, registry_node_cs)
-      data
-    }
-
   // Check transfer logic for each programmable token type and filter to only programmable tokens.
   check_transfer_and_compute_prog_value(
-    input_prog_value,
-    output_prog_value,
     proofs,
     validate_single_cs(get_registry_node, has_withdrawal, _, _),
-  )
+    dict.to_pairs(input_prog_value),
+    dict.to_pairs(output_prog_value),
+  ) == []
 }
 
 fn mk_has_withdrawal(
@@ -152,7 +153,8 @@ fn mk_get_registry_node(
         tail,
         fn(proof_idx) {
           if ref_idx == proof_idx {
-            expect has_currency_symbol(head.output.value, registry_node_cs)
+            let Pair(ref_cs, _) = peek_first_asset(head.output.value)
+            expect ref_cs == registry_node_cs
             expect InlineDatum(data) = head.output.datum
             data
           } else {
@@ -184,7 +186,7 @@ fn validate_3rd_party(
   <- expect_registry_node_3rd_party(registry_node_data)
 
   // Validate registry node is authentic
-  expect has_currency_symbol(registry_ref_input.value, registry_node_cs)
+  expect peek_first_asset(registry_ref_input.value).1st == registry_node_cs
 
   // The third party transfer logic script must be invoked
   expect has_key(tx.withdrawals, third_party_transfer_logic_script)
@@ -235,6 +237,7 @@ fn drop_accum_tokens(
     return(tokens, outputs)
   } else {
     expect [output, ..tail_outputs] = outputs
+
     let loop =
       drop_accum_tokens(
         tail_outputs,
@@ -244,6 +247,7 @@ fn drop_accum_tokens(
         _,
         return,
       )
+
     if output.address.payment_credential == prog_logic_cred {
       loop(union_tokens(output.value |> assets.tokens(policy_id), tokens))
     } else {
@@ -426,21 +430,6 @@ fn get_signed_prog_value(
 /// Sum values from a list of inputs
 /// Check transfer logic for each currency symbol and filter to only programmable tokens
 fn check_transfer_and_compute_prog_value(
-  input_value: RawValue,
-  output_value: RawValue,
-  proofs: List<RegistryProof>,
-  check_policy: fn(PolicyId, RegistryProof) -> Bool,
-) -> Bool {
-  let input_assets = dict.to_pairs(input_value)
-  let output_assets = dict.to_pairs(output_value)
-
-  let remaining_proofs =
-    do_check_transfer(proofs, check_policy, input_assets, output_assets)
-
-  [] == remaining_proofs
-}
-
-fn do_check_transfer(
   proofs: List<RegistryProof>,
   check_policy: fn(PolicyId, RegistryProof) -> Bool,
   input_assets: Pairs<PolicyId, Dict<AssetName, Int>>,
@@ -448,14 +437,9 @@ fn do_check_transfer(
 ) -> List<RegistryProof> {
   when input_assets is {
     [] -> proofs
-    [Pair(cs, head_input_tokens), ..tail_input_assets] -> {
+    [Pair(cs, head_input_tokens), ..tail_input_assets] ->
       // We expect one proof per policy, if not, this blows up and halts the validation.
-      let proof = head_list(proofs)
-
-      let loop =
-        do_check_transfer(tail_list(proofs), check_policy, tail_input_assets, _)
-
-      if check_policy(cs, proof) {
+      if check_policy(cs, head_list(proofs)) {
         // Existing programmable token, must be in output.
 
         // Outputs must be a superset of inputs, so they may contain extra
@@ -472,12 +456,21 @@ fn do_check_transfer(
             dict.to_pairs(head_input_tokens),
           )
 
-        loop(tail_output_assets)
+        check_transfer_and_compute_prog_value(
+          tail_list(proofs),
+          check_policy,
+          tail_input_assets,
+          tail_output_assets,
+        )
       } else {
         // Not a programmable token, skip it
-        loop(output_assets)
+        check_transfer_and_compute_prog_value(
+          tail_list(proofs),
+          check_policy,
+          tail_input_assets,
+          output_assets,
+        )
       }
-    }
   }
 }
 
@@ -502,7 +495,9 @@ fn validate_single_cs(
       expect key == cs
 
       // Validate the transfer logic script is invoked
-      has_withdrawal(transfer_logic_script)
+      expect has_withdrawal(transfer_logic_script)
+
+      True
     }
 
     TokenDoesNotExist { .. } -> {

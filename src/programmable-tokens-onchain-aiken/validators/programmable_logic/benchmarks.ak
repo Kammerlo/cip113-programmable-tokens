@@ -2,6 +2,7 @@
 
 use aiken/collection/list
 use aiken/fuzz
+use cardano/address.{VerificationKey}
 use cardano/assets.{AssetName, PolicyId}
 use cardano/fuzz as cardano
 use cardano/transaction.{Input, Output, OutputReference, Transaction}
@@ -468,6 +469,109 @@ test plutarch_baseline_transfer_2() {
   )
 }
 
+/// --- Plutarch baseline 3 (transfer) ---------------------------------------------------------------
+///
+/// Another baseline mimicking the 'globalTransferMixedManyCtx' from Plutarch's reference implementation
+/// ------------------------------------------------------------------------------------------------
+const fixture_plutarch_baseline_transfer_3: Transaction = {
+    let signer_vkh = #"01010101010101010101010101010101010101010101010101010101"
+
+    let policy_unexisting_token_1 =
+      #"1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a"
+    let policy_unexisting_token_2 =
+      #"1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e"
+
+    let policy_programmable_token_1 =
+      #"1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b"
+    let policy_programmable_token_2 =
+      #"1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c"
+    let policy_programmable_token_3 =
+      #"1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d"
+
+    Transaction {
+      ..transaction.placeholder,
+      extra_signatories: [signer_vkh],
+      inputs: [
+        fixture.some_input_with_programmable_tokens_with(
+          VerificationKey(signer_vkh),
+          [
+            (policy_unexisting_token_1, "np1", 4),
+            (policy_programmable_token_1, "0c", 5),
+            (policy_programmable_token_2, "1c", 7),
+            (policy_programmable_token_3, "2c", 9),
+            (policy_unexisting_token_2, "np2", 6),
+          ],
+          "programmable tokens input",
+        ),
+      ],
+      outputs: [
+        fixture.some_output_with_programmable_tokens_with(
+          VerificationKey(signer_vkh),
+          [
+            (policy_programmable_token_1, "0c", 5),
+            (policy_programmable_token_2, "1c", 7),
+            (policy_programmable_token_3, "2c", 9),
+          ],
+        ),
+        Output {
+          ..fixture.some_output_change("change"),
+          value: fixture.min_ada_value
+            |> assets.add(policy_unexisting_token_1, "np1", 4)
+            |> assets.add(policy_unexisting_token_2, "np2", 6),
+        },
+      ],
+      reference_inputs: [
+        // Reference inputs with the protocol params. Identified by a specific NFT.
+        // Holds a ProtocolParams inline datum with configuration.
+        fixture.some_reference_input_protocol_params(
+          fixture.protocol_params,
+          "protocol params",
+        ),
+        fixture.some_reference_input_tokens_registry_node(
+          #"",
+          #"ffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bb00",
+        ),
+        fixture.some_reference_input_tokens_registry_node(
+          policy_programmable_token_1,
+          policy_programmable_token_2,
+          "bb10",
+        ),
+        fixture.some_reference_input_tokens_registry_node(
+          policy_programmable_token_2,
+          policy_programmable_token_3,
+          "bb11",
+        ),
+        fixture.some_reference_input_tokens_registry_node(
+          policy_programmable_token_3,
+          #"ffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bb12",
+        ),
+      ],
+      withdrawals: [Pair(fixture.credential_transfer_logic, 0)],
+    }
+  }
+
+const fixture_redeemer_plutarch_baseline_transfer_3: ProgrammableLogicGlobalRedeemer =
+  TransferAct {
+    proofs: [
+      TokenDoesNotExist { node_idx: 1 },
+      TokenExists { node_idx: 2 },
+      TokenExists { node_idx: 3 },
+      TokenExists { node_idx: 4 },
+      TokenDoesNotExist { node_idx: 1 },
+    ],
+  }
+
+test plutarch_baseline_transfer_3() {
+  programmable_logic_global.programmable_logic_global.withdraw(
+    fixture.policy_protocol_params,
+    fixture_redeemer_plutarch_baseline_transfer_3,
+    fixture.credential_validator_logic_global,
+    fixture_plutarch_baseline_transfer_3,
+  )
+}
+
 /// --- Bench: tokens ------------------------------------------------------------------------------
 ///
 /// A benchmark evaluating the impact of increasing the number of tokens from a
@@ -520,6 +624,7 @@ fn sample_many_inputs(
     fuzz.map(
       fuzz.list_between(
         fixture.any_input_with_programmable_tokens(
+          fixture.credential_transfer_logic,
           [(policy_programmable_token, asset_name_programmable_token, 1)],
         ),
         size + 1,

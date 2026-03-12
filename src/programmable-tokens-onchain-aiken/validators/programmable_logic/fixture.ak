@@ -89,6 +89,7 @@ pub fn some_input_fuel(label: ByteArray) -> Input {
 /// the transfer logic and holding the given tokens (which may or may not be
 /// registered tokens)
 pub fn any_input_with_programmable_tokens(
+  stake_credential: Credential,
   tokens: List<(PolicyId, AssetName, Int)>,
 ) -> Fuzzer<Input> {
   let output_reference <- fuzz.map(cardano.output_reference())
@@ -97,7 +98,7 @@ pub fn any_input_with_programmable_tokens(
     output: Output {
       address: Address {
         payment_credential: credential_validator_logic_base,
-        stake_credential: Some(Inline(credential_transfer_logic)),
+        stake_credential: Some(Inline(stake_credential)),
       },
       value: list.foldr(
         tokens,
@@ -112,13 +113,25 @@ pub fn any_input_with_programmable_tokens(
   }
 }
 
+pub fn some_input_with_programmable_tokens_with(
+  stake_credential: Credential,
+  tokens: List<(PolicyId, AssetName, Int)>,
+  label: ByteArray,
+) -> Input {
+  generate(any_input_with_programmable_tokens(stake_credential, tokens), label)
+}
+
 /// A deterministic version of 'any_input_with_programmable_tokens', which
 /// determinism is given by the label.
 pub fn some_input_with_programmable_tokens(
   tokens: List<(PolicyId, AssetName, Int)>,
   label: ByteArray,
 ) -> Input {
-  generate(any_input_with_programmable_tokens(tokens), label)
+  some_input_with_programmable_tokens_with(
+    credential_transfer_logic,
+    tokens,
+    label,
+  )
 }
 
 /// Some reference inputs holding the given protocol params as inline datum.
@@ -151,15 +164,14 @@ pub fn some_output_change(label: ByteArray) -> Output {
   }
 }
 
-/// An arbitrary 'programmable' output (i.e. locked by the base logic +
-/// transfer logic) containing the given tokens.
-pub fn some_output_with_programmable_tokens(
+pub fn some_output_with_programmable_tokens_with(
+  stake_credential: Credential,
   tokens: List<(PolicyId, AssetName, Int)>,
 ) -> Output {
   Output {
     address: Address {
       payment_credential: credential_validator_logic_base,
-      stake_credential: Some(Inline(credential_transfer_logic)),
+      stake_credential: Some(Inline(stake_credential)),
     },
     value: list.foldr(
       tokens,
@@ -171,6 +183,14 @@ pub fn some_output_with_programmable_tokens(
     datum: NoDatum,
     reference_script: None,
   }
+}
+
+/// An arbitrary 'programmable' output (i.e. locked by the base logic +
+/// transfer logic) containing the given tokens.
+pub fn some_output_with_programmable_tokens(
+  tokens: List<(PolicyId, AssetName, Int)>,
+) -> Output {
+  some_output_with_programmable_tokens_with(credential_transfer_logic, tokens)
 }
 
 /// An arbitrary seized output (i.e. locked by the base logic +
@@ -196,7 +216,9 @@ pub fn some_output_with_seized_tokens(
 }
 
 /// A token registry linked-list node configured with the 'transfer_logic'
-pub fn some_reference_input_tokens_registry_node(
+pub fn some_reference_input_tokens_registry_node_with(
+  transfer_logic_script: Credential,
+  third_party_transfer_logic_script: Credential,
   key: ByteArray,
   next: ByteArray,
   label: ByteArray,
@@ -214,8 +236,8 @@ pub fn some_reference_input_tokens_registry_node(
           RegistryNode {
             key,
             next,
-            transfer_logic_script: credential_transfer_logic,
-            third_party_transfer_logic_script: credential_3rd_party_logic,
+            transfer_logic_script,
+            third_party_transfer_logic_script,
             global_state_cs: "",
           },
         ),
@@ -223,6 +245,20 @@ pub fn some_reference_input_tokens_registry_node(
       reference_script: None,
     },
   }
+}
+
+pub fn some_reference_input_tokens_registry_node(
+  key: ByteArray,
+  next: ByteArray,
+  label: ByteArray,
+) -> Input {
+  some_reference_input_tokens_registry_node_with(
+    credential_transfer_logic,
+    credential_3rd_party_logic,
+    key,
+    next,
+    label,
+  )
 }
 
 /// A baseline transaction for transferring tokens which can be used a

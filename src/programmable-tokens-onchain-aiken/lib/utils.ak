@@ -348,3 +348,11 @@ fn do_split_at(
     [] -> return(before, dict.empty, [])
   }
 }
+
+pub fn peek_first_asset(value: Value) -> Pair<PolicyId, Tokens> {
+  value
+    |> assets.to_dict
+    |> dict.to_pairs
+    |> tail_list
+    |> head_list
+}
