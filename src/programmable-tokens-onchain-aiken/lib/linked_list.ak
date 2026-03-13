@@ -7,7 +7,7 @@ use cardano/address.{Credential, Script, VerificationKey}
 
 use cardano/assets.{PolicyId, Value, tokens}
 use cardano/transaction.{Input, Output, Transaction}
-use types.{RegistryNode, empty_vkey, origin_node_tn}
+use registry_node.{RegistryNode, empty_vkey, origin_node_tn}
 use utils.{
   bytearray_lt, count_unique_tokens, expect_inline_datum, has_currency_symbol,
 }

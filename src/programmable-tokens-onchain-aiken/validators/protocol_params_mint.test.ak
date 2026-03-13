@@ -12,8 +12,10 @@ use cardano/assets.{PolicyId, ada_asset_name, ada_policy_id, from_asset}
 use cardano/transaction.{
   InlineDatum, Input, NoDatum, Output, OutputReference, Transaction,
 }
+use programmable_logic/params.{
+  ProgrammableLogicGlobalParams, protocol_params_token,
+}
 use protocol_params_mint
-use types.{ProgrammableLogicGlobalParams, protocol_params_token}
 
 // ---------------------------------------------------------------------------
 // Test constants

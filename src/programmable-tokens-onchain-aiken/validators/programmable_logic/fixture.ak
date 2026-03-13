@@ -9,10 +9,9 @@ use cardano/address.{Address, Credential, Inline}
 use cardano/assets.{AssetName, PolicyId, Value, ada_asset_name, ada_policy_id}
 use cardano/fuzz as cardano
 use cardano/transaction.{InlineDatum, Input, NoDatum, Output, Transaction}
-use types.{
-  ProgrammableLogicGlobalParams, ProgrammableLogicGlobalRedeemer, RegistryNode,
-  TokenExists, TransferAct,
-}
+use programmable_logic/params.{ProgrammableLogicGlobalParams}
+use registry_node.{RegistryNode}
+use types.{ProgrammableLogicGlobalRedeemer, TokenExists, TransferAct}
 
 /// Some script credential for the transfer logic. Could also be a verification
 /// key hash, but the primary use-case is for script.

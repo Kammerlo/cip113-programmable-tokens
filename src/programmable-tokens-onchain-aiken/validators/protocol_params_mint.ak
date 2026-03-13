@@ -11,7 +11,9 @@ use aiken/collection/list
 use cardano/address
 use cardano/assets.{PolicyId, flatten}
 use cardano/transaction.{InlineDatum, OutputReference, Transaction}
-use types.{ProgrammableLogicGlobalParams, protocol_params_token}
+use programmable_logic/params.{
+  ProgrammableLogicGlobalParams, protocol_params_token,
+}
 
 validator protocol_params_mint(
   utxo_ref: OutputReference,

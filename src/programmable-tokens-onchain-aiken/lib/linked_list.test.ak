@@ -1,7 +1,7 @@
 // Unit tests for linked list validation logic
 use cardano/address.{Script}
 use linked_list.{is_inserted_directory_node, is_updated_directory_node}
-use types.{RegistryNode}
+use registry_node.{RegistryNode}
 use utils.{bytearray_lt}
 
 // Helper to create a test address
@@ -193,8 +193,8 @@ test is_updated_directory_node_rejects_global_state_swap() fail {
       transfer_logic_script: Script(#"11"),
       third_party_transfer_logic_script: Script(#"22"),
       global_state_cs: #"deaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead",
-      // ^^^ TAMPERED — original was #""
     }
 
+  // ^^^ TAMPERED — original was #""
   is_updated_directory_node(tampered_node, original, #"bb")
 }

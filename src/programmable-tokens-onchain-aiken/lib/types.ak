@@ -1,44 +1,10 @@
 // Core data types for CIP-0143 programmable tokens
 // Migrated from SmartTokens.Types.PTokenDirectory and SmartTokens.Types.ProtocolParams
 
-use cardano/address.{Credential, VerificationKey}
-use cardano/assets.{PolicyId}
-
-/// Constants for token names
-pub const origin_node_tn = #""
-
-/// Protocol parameters NFT token name
-pub const protocol_params_token = "ProtocolParams"
-
-/// Empty Verification Key
-pub const empty_vkey = VerificationKey(#"")
+use cardano/address.{Credential}
 
 /// Token name for the issuance CBOR hex reference NFT
 pub const issuance_cbor_hex_token_name = "IssuanceCborHex"
-
-/// Registry node in the linked list of registered programmable token policies
-/// This represents an entry in the CIP-0143 registry
-pub type RegistryNode {
-  /// The key (currency symbol) of the programmable token policy
-  key: ByteArray,
-  /// The next key in lexicographical order (for linked list traversal)
-  next: ByteArray,
-  /// The transfer logic script credential that validates token transfers
-  transfer_logic_script: Credential,
-  /// The third party transfer logic script credential that handles admin actions (seizure, etc.)
-  third_party_transfer_logic_script: Credential,
-  /// Optional global state NFT currency symbol for this policy
-  global_state_cs: ByteArray,
-}
-
-/// Protocol parameters stored on-chain
-/// This is referenced by all programmable token transactions
-pub type ProgrammableLogicGlobalParams {
-  /// Currency symbol of the registry node NFTs
-  registry_node_cs: PolicyId,
-  /// The programmable logic base credential (payment credential for all programmable token UTxOs)
-  prog_logic_cred: Credential,
-}
 
 /// Proof that a token is (or is not) in the registry
 pub type RegistryProof {

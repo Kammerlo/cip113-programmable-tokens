@@ -10,11 +10,10 @@ use cardano/transaction.{
   InlineDatum, Input, NoDatum, Output, OutputReference, Transaction,
 }
 use programmable_logic/fixture
+use programmable_logic/params.{ProgrammableLogicGlobalParams}
 use programmable_logic_global
-use types.{
-  ProgrammableLogicGlobalParams, RegistryNode, ThirdPartyAct, TokenDoesNotExist,
-  TokenExists, TransferAct,
-}
+use registry_node.{RegistryNode}
+use types.{ThirdPartyAct, TokenDoesNotExist, TokenExists, TransferAct}
 use utils.{bytearray_lt}
 
 const test_registry_node_cs: PolicyId =

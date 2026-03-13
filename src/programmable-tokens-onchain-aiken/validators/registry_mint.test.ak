@@ -3,7 +3,7 @@ use aiken/builtin
 use cardano/address.{Address, Script}
 use cardano/assets.{ada_asset_name, ada_policy_id, from_asset}
 use cardano/transaction.{Input, NoDatum, Output, OutputReference}
-use types.{RegistryNode}
+use registry_node.{RegistryNode}
 
 // Test data
 const test_utxo_ref = OutputReference { transaction_id: #"00", output_index: 0 }
