@@ -174,6 +174,16 @@ Copyright 2024 Cardano Foundation
 
 ---
 
+## Built With
+
+- [Aiken](https://aiken-lang.org/) — Smart contract language for Cardano
+- [MeshJS](https://meshjs.dev/) — Cardano TypeScript SDK for frontend transaction building
+- [Cardano Node](https://github.com/IntersectMBO/cardano-node) — Blockchain infrastructure
+- [Spring Boot](https://spring.io/projects/spring-boot) — Off-chain backend services
+- [Next.js](https://nextjs.org/) — Frontend framework
+
+---
+
 ## Acknowledgments
 
 This project builds on the pioneering work of:

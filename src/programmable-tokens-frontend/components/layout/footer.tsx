@@ -98,7 +98,27 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="mt-8 pt-8 border-t border-dark-800">
+        <div className="mt-8 pt-8 border-t border-dark-800 flex flex-col items-center gap-4">
+          <div className="flex items-center gap-2 text-sm text-dark-400">
+            <span>Powered by</span>
+            <a
+              href="https://aiken-lang.org"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:opacity-80 transition-opacity"
+            >
+              <img src="/aiken-logo.png" alt="Aiken" className="h-6" />
+            </a>
+            <span>&</span>
+            <a
+              href="https://meshjs.dev"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:opacity-80 transition-opacity"
+            >
+              <img src="/mesh-logo.svg" alt="MeshJS" className="h-6" />
+            </a>
+          </div>
           <p className="text-center text-sm text-dark-400">
             Licensed under Apache License 2.0
           </p>
