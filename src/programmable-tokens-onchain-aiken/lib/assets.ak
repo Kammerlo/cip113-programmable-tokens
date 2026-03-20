@@ -1,6 +1,5 @@
 use aiken/builtin.{less_than_bytearray}
 use aiken/collection/dict
-use aiken/collection/dict/strategy as dict_strategy
 use cardano/assets.{PolicyId, Value}
 use cardano/transaction.{Output}
 use env
@@ -148,7 +147,7 @@ fn do_insert(self: Assets, k1: PolicyId, v1: Tokens) -> Assets {
         [Pair(k1, v1), ..self]
       } else {
         if k1 == k2 {
-          [Pair(k1, dict.union_with(v1, v2, dict_strategy.sum())), ..rest]
+          [Pair(k1, tokens.union(v1, v2)), ..rest]
         } else {
           [Pair(k2, v2), ..do_insert(rest, k1, v1)]
         }

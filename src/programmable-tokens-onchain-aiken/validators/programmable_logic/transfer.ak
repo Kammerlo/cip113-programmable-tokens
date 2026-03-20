@@ -131,21 +131,28 @@ fn verify_proofs(
         policy,
         list.head(proofs),
         fn() {
-          // Existing programmable token, must be in output.
+          let tail_output_assets =
+            if head_input_tokens == dict.empty {
+              // Tokens have been entirely consumed (a.k.a burned) so they won't appear in outputs.
+              output_assets
+            } else {
+              // Existing programmable token, must be in output.
 
-          // Outputs must be a superset of inputs, so they may contain extra
-          // policies not found in validated inputs. Yet, both input assets and
-          // output assets are in ascending policy order.
-          let
-            head_output_tokens,
-            tail_output_assets,
-          <- pairs.pop_until(output_assets, equals_bytearray(policy, _))
+              // Outputs must be a superset of inputs, so they may contain extra
+              // policies not found in validated inputs. Yet, both input assets and
+              // output assets are in ascending policy order.
+              let
+                head_output_tokens,
+                tail_output_assets,
+              <- pairs.pop_until(output_assets, equals_bytearray(policy, _))
+              expect
+                tokens.contains(
+                  dict.to_pairs(head_output_tokens),
+                  dict.to_pairs(head_input_tokens),
+                )
 
-          expect
-            tokens.contains(
-              dict.to_pairs(head_output_tokens),
-              dict.to_pairs(head_input_tokens),
-            )
+              tail_output_assets
+            }
 
           verify_proofs(
             list.tail(proofs),
