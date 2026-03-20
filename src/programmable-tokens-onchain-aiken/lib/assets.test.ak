@@ -220,7 +220,7 @@ test collect_keeps_null_policies() {
 
   let mint = value.from_asset("foo", "bar", -1) |> assets.from_value
 
-  let expected = [Pair("foo", dict.from_ascending_pairs([Pair("bar", 0)]))]
+  let expected = [Pair("foo", dict.empty)]
 
   expected == assets.collect([out], mint, all)
 }
