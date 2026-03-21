@@ -1,4 +1,4 @@
-use aiken/builtin.{less_than_bytearray}
+use aiken/builtin.{less_than_bytearray, less_than_equals_bytearray}
 use aiken/collection/dict
 use cardano/assets.{PolicyId, Value}
 use cardano/transaction.{Output}
@@ -35,19 +35,19 @@ fn do_split_at(
 ) -> result {
   when self is {
     [] -> return(before, dict.empty, [])
-    [head, ..tail] -> {
-      let k = head.1st
+    [Pair(k, _) as head, ..tail] ->
       if less_than_bytearray(k, at) {
         // Skip while keys are smaller (strictly) than searched key
         do_split_at(tail, at, [head, ..before], return)
-      } else if k == at {
-        // Done searching, get the value and return the tail after
-        return(before, head.2nd, tail)
       } else {
-        // The head and tail are all after the key; no need to continue searching.
-        return(before, dict.empty, self)
+        if k == at {
+          // Done searching, get the value and return the tail after
+          return(before, head.2nd, tail)
+        } else {
+          // The head and tail are all after the key; no need to continue searching.
+          return(before, dict.empty, self)
+        }
       }
-    }
   }
 }
 
@@ -142,15 +142,15 @@ pub fn union(left: Assets, right: Assets) -> Assets {
 fn do_insert(self: Assets, k1: PolicyId, v1: Tokens) -> Assets {
   when self is {
     [] -> [Pair(k1, v1)]
-    [Pair(k2, v2), ..rest] ->
-      if less_than_bytearray(k1, k2) {
-        [Pair(k1, v1), ..self]
-      } else {
+    [Pair(k2, _) as head, ..rest] ->
+      if less_than_equals_bytearray(k1, k2) {
         if k1 == k2 {
-          [Pair(k1, tokens.union(v1, v2)), ..rest]
+          [Pair(k1, tokens.union(v1, head.2nd)), ..rest]
         } else {
-          [Pair(k2, v2), ..do_insert(rest, k1, v1)]
+          [Pair(k1, v1), ..self]
         }
+      } else {
+        [head, ..do_insert(rest, k1, v1)]
       }
   }
 }
