@@ -349,8 +349,7 @@ fn validate_third_party_with_outputs(
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct { registry_node_idx: 1, length_inputs: 2, outputs_start_idx }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -476,12 +475,7 @@ test third_party_act_seized_tokens_escape_prog_cred_must_fail() fail {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -527,12 +521,7 @@ test third_party_act_seized_tokens_to_prog_cred_succeeds() {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -580,12 +569,7 @@ test third_party_act_partial_seizure_succeeds() {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -631,12 +615,7 @@ test third_party_act_delta_insufficient_remaining_fails() fail {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -1107,12 +1086,7 @@ test third_party_act_wipe_full_burn_succeeds() {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -1159,12 +1133,7 @@ test third_party_act_wipe_partial_burn_succeeds() {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -1214,12 +1183,7 @@ test third_party_act_wipe_seize_and_partial_burn() {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -1266,12 +1230,7 @@ test third_party_act_wipe_insufficient_after_burn_fails() fail {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -1311,12 +1270,7 @@ test third_party_act_unauthorized_burn_compensate_spend() fail {
       withdrawals: [Pair(fixture.credential_validator_logic_global, 0)],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -1349,7 +1303,7 @@ test third_party_act_unproven_burn_compensate_spend() fail {
           "protocol params",
         ),
         third_party_registry_node_ref_input(
-          test_third_party_policy,
+          "not-the-expected-policy",
           test_third_party_cred,
         ),
       ],
@@ -1359,12 +1313,7 @@ test third_party_act_unproven_burn_compensate_spend() fail {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 0,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -1434,12 +1383,7 @@ test third_party_act_same_policy_mint_during_seizure_succeeds() {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -1486,12 +1430,7 @@ test third_party_act_same_policy_mint_insufficient_output_fails() fail {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -1542,12 +1481,7 @@ test third_party_act_unrelated_policy_mint_succeeds() {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,
@@ -1597,12 +1531,7 @@ test third_party_act_wipe_burn_plus_unrelated_mint_succeeds() {
       ],
     }
 
-  let redeemer =
-    ThirdPartyAct {
-      registry_node_idx: 1,
-      outputs_start_idx: 0,
-      length_inputs: 1,
-    }
+  let redeemer = ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
   programmable_logic_global.programmable_logic_global.withdraw(
     fixture.policy_protocol_params,

@@ -25,8 +25,6 @@ pub type ProgrammableLogicGlobalRedeemer {
     registry_node_idx: Int,
     /// Starting index in outputs where processed outputs begin
     outputs_start_idx: Int,
-    /// Length of ALL inputs in the transaction
-    length_inputs: Int,
   }
 }
 

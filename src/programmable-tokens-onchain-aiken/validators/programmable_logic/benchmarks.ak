@@ -123,7 +123,7 @@ const fixture_baseline_3rd_party_1: Transaction = {
   }
 
 const fixture_redeemer_baseline_3rd_party_1: ProgrammableLogicGlobalRedeemer =
-  ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 2, length_inputs: 2 }
+  ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 2 }
 
 test baseline_3rd_party_1() {
   programmable_logic(
@@ -260,7 +260,7 @@ const fixture_baseline_3rd_party_2: Transaction = {
   }
 
 const fixture_redeemer_baseline_3rd_party_2: ProgrammableLogicGlobalRedeemer =
-  ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 2, length_inputs: 3 }
+  ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 2 }
 
 test baseline_3rd_party_2() {
   programmable_logic(
@@ -345,11 +345,7 @@ const fixture_baseline_3rd_party_3: Transaction = {
   }
 
 const fixture_redeemer_baseline_3rd_party_3: ProgrammableLogicGlobalRedeemer =
-  ThirdPartyAct {
-    registry_node_idx: 1,
-    outputs_start_idx: 0,
-    length_inputs: length_baseline_3rd_party_3,
-  }
+  ThirdPartyAct { registry_node_idx: 1, outputs_start_idx: 0 }
 
 test baseline_3rd_party_3() {
   programmable_logic(

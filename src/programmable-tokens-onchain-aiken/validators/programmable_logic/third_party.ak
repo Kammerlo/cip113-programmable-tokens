@@ -18,7 +18,6 @@ pub fn validate_3rd_party(
   prog_logic_cred: Credential,
   registry_node: Data,
   outputs_start_idx: Int,
-  length_inputs: Int,
 ) -> Bool {
   // Extract registry details from datum
   let
@@ -54,7 +53,6 @@ pub fn validate_3rd_party(
     prog_logic_cred,
     policy_id,
     self.inputs,
-    length_inputs,
     outputs,
     minted_or_burned,
     output_tokens,
@@ -98,111 +96,93 @@ fn check_seized_tokens(
   prog_logic_cred: Credential,
   policy_id: PolicyId,
   inputs: List<Input>,
-  length_inputs: Int,
   outputs: List<Output>,
   input_tokens: Tokens,
   output_tokens: Tokens,
 ) -> Bool {
-  // This is an optimisation where the transaction builder also provides the length of the input indexes. This
-  // allows to not have to repeatedly pattern match on the input indices list to grab the next one; and converts
-  // that check into a null check on an integer.
-  //
-  // This is safe because:
-  //
-  // - if a larger length than the real one is given:
-  //     we'll attempt to 'list.head' on an empty list and the whole validation blows up.
-  //
-  // - if a smaller length than the real one is given:
-  //     we do ensures that there are no unprocessed programmable input once we
-  //     reach 0 (which would indicate someone tried to bypass validations).
-  //
-  if length_inputs <= 0 {
-    // All inputs must have been consumed / checked
-    expect [] == inputs
+  when inputs is {
+    [] -> {
+      // Finish accumulating relevant tokens in remaining outputs. This ensure
+      // that tokens that have moved to new outputs that weren't paired with a
+      // seized input are still accounted for.
+      let total_output_tokens =
+        foldl(
+          outputs,
+          output_tokens,
+          fn(output, acc) {
+            // Ensure to only count programmable outputs, to not allow tokens to escape.
+            if output.address.payment_credential == prog_logic_cred {
+              tokens.union(
+                // We can safely restrict to the given policy id, to prevent arbitrarily large values
+                // from being too costly to merge. We check inclusion in the end, from tokens that have
+                // also been filtered by policy id. So other tokens are irrelevant.
+                //
+                // If anything, it only makes the inclusion stronger by restricting the superset further.
+                output.value |> value.tokens(policy_id),
+                acc,
+              )
+            } else {
+              acc
+            }
+          },
+        )
 
-    // Finish accumulating relevant tokens in remaining outputs. This ensure
-    // that tokens that have moved to new outputs that weren't paired with a
-    // seized input are still accounted for.
-    let total_output_tokens =
-      foldl(
-        outputs,
-        output_tokens,
-        fn(output, acc) {
-          // Ensure to only count programmable outputs, to not allow tokens to escape.
-          if output.address.payment_credential == prog_logic_cred {
-            tokens.union(
-              // We can safely restrict to the given policy id, to prevent arbitrarily large values
-              // from being too costly to merge. We check inclusion in the end, from tokens that have
-              // also been filtered by policy id. So other tokens are irrelevant.
-              //
-              // If anything, it only makes the inclusion stronger by restricting the superset further.
-              output.value |> value.tokens(policy_id),
-              acc,
-            )
-          } else {
-            acc
-          }
-        },
-      )
-
-    // All the inputs tokens (seized or not) must still be sent to the prog
-    // logic validator. This is checked by ensuring all collected tokens are
-    // contained within all programmable outputs, while allowing those outputs
-    // to contain other things.
-    tokens.contains(
-      dict.to_pairs(total_output_tokens),
-      dict.to_pairs(input_tokens),
-    )?
-  } else {
-    let Input { output: input, .. } = list.head(inputs)
-
-    // Validate all inputs pointing at a programmable proof
-    if input.address.payment_credential == prog_logic_cred {
-      // Extract the paired output and ensures it preserves address and datum
-      let output = list.head(outputs)
-      expect output.address == input.address
-      expect output.datum == input.datum
-
-      // Extract seized tokens as the delta between outputs and inputs for the
-      // given policy, ensuring all else is equal.
-      let
-        input_tokens_before,
-        input_tokens_at,
-        input_tokens_after,
-      <- assets.split_at(input.value, policy_id)
-
-      let
-        output_tokens_before,
-        output_tokens_at,
-        output_tokens_after,
-      <- assets.split_at(output.value, policy_id)
-
-      // Seized tokens must change, but only them.
-      expect and {
-          (input_tokens_before == output_tokens_before)?,
-          (input_tokens_after == output_tokens_after)?,
-          (input_tokens_at != output_tokens_at)?,
-        }
-
-      check_seized_tokens(
-        prog_logic_cred,
-        policy_id,
-        list.tail(inputs),
-        length_inputs - 1,
-        list.tail(outputs),
-        tokens.union(input_tokens, input_tokens_at),
-        tokens.union(output_tokens_at, output_tokens),
-      )
-    } else {
-      check_seized_tokens(
-        prog_logic_cred,
-        policy_id,
-        list.tail(inputs),
-        length_inputs - 1,
-        outputs,
-        input_tokens,
-        output_tokens,
-      )
+      // All the inputs tokens (seized or not) must still be sent to the prog
+      // logic validator. This is checked by ensuring all collected tokens are
+      // contained within all programmable outputs, while allowing those outputs
+      // to contain other things.
+      tokens.contains(
+        dict.to_pairs(total_output_tokens),
+        dict.to_pairs(input_tokens),
+      )?
     }
+
+    [Input { output: input, .. }, ..tail_inputs] ->
+      // Validate all inputs pointing at a programmable proof
+      if input.address.payment_credential == prog_logic_cred {
+        // Extract the paired output and ensures it preserves address and datum
+        let output = list.head(outputs)
+        expect output.address == input.address
+        expect output.datum == input.datum
+
+        // Extract seized tokens as the delta between outputs and inputs for the
+        // given policy, ensuring all else is equal.
+        let
+          input_tokens_before,
+          input_tokens_at,
+          input_tokens_after,
+        <- assets.split_at(input.value, policy_id)
+
+        let
+          output_tokens_before,
+          output_tokens_at,
+          output_tokens_after,
+        <- assets.split_at(output.value, policy_id)
+
+        // Seized tokens must change, but only them.
+        expect and {
+            (input_tokens_before == output_tokens_before)?,
+            (input_tokens_after == output_tokens_after)?,
+            (input_tokens_at != output_tokens_at)?,
+          }
+
+        check_seized_tokens(
+          prog_logic_cred,
+          policy_id,
+          tail_inputs,
+          list.tail(outputs),
+          tokens.union(input_tokens, input_tokens_at),
+          tokens.union(output_tokens_at, output_tokens),
+        )
+      } else {
+        check_seized_tokens(
+          prog_logic_cred,
+          policy_id,
+          tail_inputs,
+          outputs,
+          input_tokens,
+          output_tokens,
+        )
+      }
   }
 }
