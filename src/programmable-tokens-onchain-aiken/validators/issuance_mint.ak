@@ -5,9 +5,10 @@ use aiken/collection/list
 // Migrated from SmartTokens.Contracts.Issuance
 
 use cardano/address.{Credential, Inline}
-use cardano/assets.{PolicyId, quantity_of}
+use cardano/assets.{PolicyId}
 use cardano/transaction.{Mint, Output, ScriptPurpose, Transaction}
 use registry_node.{RegistryNode}
+use tokens
 use types.{OutputIndex, RefInput, SmartTokenMintingAction}
 use utils.{expect_inline_datum}
 
@@ -24,7 +25,7 @@ validator issuance_mint(
     own_policy: PolicyId,
     self: Transaction,
   ) {
-    // Check that the minting logic script is invoked
+    // Collect all invoked scripts (withdraw-zero pattern)
     let invoked_scripts =
       list.map(
         self.withdrawals,
@@ -33,78 +34,73 @@ validator issuance_mint(
           cred
         },
       )
-    // Check token was or is being registered in the registry.
-    // is_first_mint distinguishes registration-in-this-tx (OutputIndex) from
-    // already-registered (RefInput) — this drives output validation below.
-    let is_first_mint =
+
+    // Registry proof determines WHO validates outputs:
+    //
+    //   OutputIndex → First mint. PLGlobal doesn't know or see the registry entry for this token.
+    //                 issuance_mint MUST validate outputs. Qty always > 0.
+    //
+    //   RefInput + PLB spent → PLGlobal is mint-aware and will validate
+    //                          everything (mint AND burn). Delegate.
+    //
+    //   RefInput + no PLB spent → Pure subsequent mint. issuance_mint validates.
+    //                             (Burn is impossible here: tokens to burn must
+    //                              be in inputs, prog tokens live at PLB,
+    //                              spending PLB = PLB spent → delegate path.)
+    let valid_minting =
       when redeemer.minting_registry_proof is {
-        RefInput { index } -> {
-          let ref_input_opt = list.at(self.reference_inputs, index)
-          expect Some(ref_input) = ref_input_opt
-          expect _ =
-            verify_registry_node(ref_input.output, registry_node_cs, own_policy)
-          False
-        }
         OutputIndex { index } -> {
+          // FIRST MINT — registry node being (re-)created in this tx
           let output_opt = list.at(self.outputs, index)
           expect Some(output) = output_opt
-          // just ensure this is a genuine first mint and no sneaky transfer AND registry update at the same time
           let registry =
             verify_registry_node(output, registry_node_cs, own_policy)
+          // Anti-abuse: no transfer logic during first mint
+          // (prevents sneaky transfer + registry update in same tx)
           expect !list.has(invoked_scripts, registry.transfer_logic_script)
-          True
-        }
-      }
 
-    // Get the minted/burned amount for this policy
-    expect Some(minted_assets) =
-      assets.to_dict(self.mint) |> dict.get(own_policy)
-    expect [Pair(token_name, quantity)] = minted_assets |> dict.to_pairs
-
-    let valid_minting =
-      if quantity > 0 {
-        if is_first_mint {
-          // First mint (registration happening in this tx via OutputIndex).
-          // PLGlobal is unaware of this token — we must verify ALL minted
-          // tokens land at PLB with a stake credential.
+          // First mint ⇒ all minted tokens must go to PLB
+          let minted = self.mint |> assets.tokens(own_policy)
           validate_mint_outputs(
             self.outputs,
             programmable_logic_base,
             own_policy,
-            token_name,
-            quantity,
+            minted,
           )?
-        } else {
-          // Subsequent mint (token already registered, RefInput proof).
-          let is_spend =
+        }
+
+        RefInput { index } -> {
+          // ALREADY REGISTERED — verify registry node
+          let ref_input_opt = list.at(self.reference_inputs, index)
+          expect Some(ref_input) = ref_input_opt
+          expect _ =
+            verify_registry_node(ref_input.output, registry_node_cs, own_policy)
+
+          // Can we delegate to PLGlobal?
+          let plb_spent =
             list.any(
               self.inputs,
               fn(input) {
                 input.output.address.payment_credential == programmable_logic_base
               },
             )
-          if is_spend {
-            // PLB is being spent → PLGlobal validates all invariants for
-            // this token (value preservation, outputs at PLB, etc.) and
-            // accounts for minting in its balance checks.
+
+          if plb_spent {
+            // PLGlobal is mint-aware — delegate all validation
+            // (handles both minting and burning accounting)
             True
           } else {
-            // Pure subsequent mint, no spend — validate outputs ourselves.
+            // No PLB spend → can only be pure minting
+            // (burn requires spending PLB UTxOs → plb_spent would be True)
+            let minted = self.mint |> assets.tokens(own_policy)
             validate_mint_outputs(
               self.outputs,
               programmable_logic_base,
               own_policy,
-              token_name,
-              quantity,
+              minted,
             )?
           }
         }
-      } else if quantity < 0 {
-        // Burning tokens - no additional checks needed beyond the minting logic being invoked
-        True
-      } else {
-        // Zero minting is not allowed
-        fail @"Cannot mint zero tokens"
       }
 
     and {
@@ -160,27 +156,29 @@ fn single_mint_with_credential(
   matching_count == 1
 }
 
-/// Validate that exactly `expected_qty` of the minted token ends up at
-/// PLB outputs, each with an inline stake credential (owner).
+/// Validate that ALL minted tokens end up at PLB outputs with stake credentials.
+/// Collects tokens for `own_policy` across all PLB outputs and checks exact match.
+/// Reuses `tokens.union` and `value.tokens` (battle-tested in PLGlobal).
 fn validate_mint_outputs(
   outputs: List<Output>,
   programmable_logic_base: Credential,
   own_policy: PolicyId,
-  token_name: ByteArray,
-  expected_qty: Int,
+  expected: tokens.Tokens,
 ) -> Bool {
-  (list.foldl(
-    outputs,
-    0,
-    fn(output, acc) -> Int {
-      if output.address.payment_credential == programmable_logic_base {
-        expect Some(Inline(_stake_cred)) = output.address.stake_credential
-        acc + quantity_of(output.value, own_policy, token_name)
-      } else {
-        acc
-      }
-    },
-  ) == expected_qty)?
+  let total_at_plb =
+    list.foldl(
+      outputs,
+      dict.empty,
+      fn(output, acc) {
+        if output.address.payment_credential == programmable_logic_base {
+          expect Some(Inline(_stake_cred)) = output.address.stake_credential
+          tokens.union(acc, assets.tokens(output.value, own_policy))
+        } else {
+          acc
+        }
+      },
+    )
+  (total_at_plb == expected)?
 }
 
 fn verify_registry_node(

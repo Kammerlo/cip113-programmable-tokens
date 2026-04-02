@@ -88,6 +88,23 @@ fn mint_output(qty: Int) -> Output {
   }
 }
 
+fn mint_output_named(token_name: ByteArray, qty: Int) -> Output {
+  Output {
+    address: Address {
+      payment_credential: test_plb_cred,
+      stake_credential: Some(
+        Inline(
+          Script(#"77777777777777777777777777777777777777777777777777777777"),
+        ),
+      ),
+    },
+    value: min_ada
+      |> assets.add(test_own_policy, token_name, qty),
+    datum: NoDatum,
+    reference_script: None,
+  }
+}
+
 fn some_ref_input(output: Output) -> Input {
   Input {
     output_reference: OutputReference {
@@ -153,11 +170,22 @@ test valid_mint_with_output_index() {
   call_validator(rdmr, tx)
 }
 
+// Burning requires PLB inputs (tokens to burn live at PLB addresses).
+// PLB spend → plb_spent = True → delegate to PLGlobal.
 test valid_burn() {
   let rdmr = valid_redeemer()
   let tx =
     Transaction {
       ..transaction.placeholder,
+      inputs: [
+        Input {
+          output_reference: OutputReference {
+            transaction_id: #"0000000000000000000000000000000000000000000000000000000000000000",
+            output_index: 0,
+          },
+          output: mint_output(50),
+        },
+      ],
       reference_inputs: [some_ref_input(registry_node_output(test_own_policy))],
       outputs: [],
       mint: from_asset(test_own_policy, test_token_name, -50),
@@ -482,18 +510,166 @@ test duplicate_mint_redeemer_fails() fail {
 }
 
 // ========================================================================
-// Multiple token names not allowed (POC constraint)
+// Multi-token minting under same policy
+//
+// These tests express desired multi-token behavior.
+// Use cases: share classes, soulbound DIDs, auth NFTs, programmable NFTs.
+// See: https://github.com/cardano-foundation/cip113-programmable-tokens/pull/45#discussion_r3019195411
 // ========================================================================
 
-test multiple_token_names_fails() fail {
+const test_token_name_2 = #"746f6b656e32"
+
+fn multi_mint_output(qty1: Int, qty2: Int) -> Output {
+  Output {
+    address: Address {
+      payment_credential: test_plb_cred,
+      stake_credential: Some(
+        Inline(
+          Script(#"77777777777777777777777777777777777777777777777777777777"),
+        ),
+      ),
+    },
+    value: min_ada
+      |> assets.add(test_own_policy, test_token_name, qty1)
+      |> assets.add(test_own_policy, test_token_name_2, qty2),
+    datum: NoDatum,
+    reference_script: None,
+  }
+}
+
+// Multi-token mint: two token names, both to PLB, RefInput proof
+test multi_token_mint_ref_input() {
   let rdmr = valid_redeemer()
   let tx =
     Transaction {
       ..transaction.placeholder,
       reference_inputs: [some_ref_input(registry_node_output(test_own_policy))],
-      outputs: [mint_output(100)],
+      outputs: [multi_mint_output(100, 50)],
       mint: from_asset(test_own_policy, test_token_name, 100)
-        |> assets.add(test_own_policy, #"6f74686572", 50),
+        |> assets.add(test_own_policy, test_token_name_2, 50),
+      withdrawals: [Pair(test_ml_cred, 0)],
+      redeemers: [Pair(Mint(test_own_policy), as_data(rdmr))],
+    }
+  call_validator(rdmr, tx)
+}
+
+// Multi-token first mint: two token names, OutputIndex proof
+test multi_token_mint_output_index() {
+  let rdmr =
+    SmartTokenMintingAction {
+      minting_logic_cred: test_ml_cred,
+      minting_registry_proof: OutputIndex(1),
+    }
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      outputs: [
+        multi_mint_output(100, 50),
+        registry_node_output(test_own_policy),
+      ],
+      mint: from_asset(test_own_policy, test_token_name, 100)
+        |> assets.add(test_own_policy, test_token_name_2, 50),
+      withdrawals: [Pair(test_ml_cred, 0)],
+      redeemers: [Pair(Mint(test_own_policy), as_data(rdmr))],
+    }
+  call_validator(rdmr, tx)
+}
+
+// Multi-token mint: split across two PLB outputs
+test multi_token_mint_split_outputs() {
+  let rdmr = valid_redeemer()
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      reference_inputs: [some_ref_input(registry_node_output(test_own_policy))],
+      outputs: [mint_output(100), mint_output_named(test_token_name_2, 50)],
+      mint: from_asset(test_own_policy, test_token_name, 100)
+        |> assets.add(test_own_policy, test_token_name_2, 50),
+      withdrawals: [Pair(test_ml_cred, 0)],
+      redeemers: [Pair(Mint(test_own_policy), as_data(rdmr))],
+    }
+  call_validator(rdmr, tx)
+}
+
+// Multi-token mint: one token escapes to non-PLB — must fail
+test multi_token_mint_partial_escape_fails() fail {
+  let rdmr = valid_redeemer()
+  let non_plb_output =
+    Output {
+      address: Address {
+        payment_credential: Script(
+          #"99999999999999999999999999999999999999999999999999999999",
+        ),
+        stake_credential: Some(
+          Inline(
+            Script(#"77777777777777777777777777777777777777777777777777777777"),
+          ),
+        ),
+      },
+      value: min_ada
+        |> assets.add(test_own_policy, test_token_name_2, 50),
+      datum: NoDatum,
+      reference_script: None,
+    }
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      reference_inputs: [some_ref_input(registry_node_output(test_own_policy))],
+      // tokenA goes to PLB, tokenB escapes to non-PLB
+      outputs: [mint_output(100), non_plb_output],
+      mint: from_asset(test_own_policy, test_token_name, 100)
+        |> assets.add(test_own_policy, test_token_name_2, 50),
+      withdrawals: [Pair(test_ml_cred, 0)],
+      redeemers: [Pair(Mint(test_own_policy), as_data(rdmr))],
+    }
+  call_validator(rdmr, tx)
+}
+
+// Multi-token burn: burn two token names
+// Burning requires PLB inputs → plb_spent = True → delegates to PLGlobal
+test multi_token_burn() {
+  let rdmr = valid_redeemer()
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [
+        Input {
+          output_reference: OutputReference {
+            transaction_id: #"0000000000000000000000000000000000000000000000000000000000000000",
+            output_index: 0,
+          },
+          output: multi_mint_output(100, 50),
+        },
+      ],
+      reference_inputs: [some_ref_input(registry_node_output(test_own_policy))],
+      outputs: [],
+      mint: from_asset(test_own_policy, test_token_name, -100)
+        |> assets.add(test_own_policy, test_token_name_2, -50),
+      withdrawals: [Pair(test_ml_cred, 0)],
+      redeemers: [Pair(Mint(test_own_policy), as_data(rdmr))],
+    }
+  call_validator(rdmr, tx)
+}
+
+// Multi-token spend + mint (RefInput, PLB input) → defers to PLGlobal
+test multi_token_spend_and_mint_defers() {
+  let rdmr = valid_redeemer()
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [
+        Input {
+          output_reference: OutputReference {
+            transaction_id: #"0000000000000000000000000000000000000000000000000000000000000000",
+            output_index: 0,
+          },
+          output: multi_mint_output(100, 50),
+        },
+      ],
+      reference_inputs: [some_ref_input(registry_node_output(test_own_policy))],
+      outputs: [multi_mint_output(200, 100)],
+      mint: from_asset(test_own_policy, test_token_name, 100)
+        |> assets.add(test_own_policy, test_token_name_2, 50),
       withdrawals: [Pair(test_ml_cred, 0)],
       redeemers: [Pair(Mint(test_own_policy), as_data(rdmr))],
     }
