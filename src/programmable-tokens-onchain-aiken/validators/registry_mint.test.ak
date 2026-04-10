@@ -2,14 +2,18 @@
 //// Invokes the validator's mint handler directly, covering both
 //// RegistryInit and RegistryInsert redeemer paths.
 
-use cardano/address.{Address, Script}
+use cardano/address.{Address, Credential, Inline, Script}
 use cardano/assets.{PolicyId, ada_asset_name, ada_policy_id, from_asset}
 use cardano/transaction.{
-  InlineDatum, Input, NoDatum, Output, OutputReference, Transaction,
+  InlineDatum, Input, Mint, NoDatum, Output, OutputReference, Transaction,
 }
+use issuance_mint
 use registry_mint
 use registry_node.{RegistryNode, empty_vkey, origin_node_tn}
-use types.{IssuanceCborHex, RegistryInit, RegistryInsert, RegistryRedeemer}
+use types.{
+  IssuanceCborHex, RefInput, RegistryInit, RegistryInsert, RegistryRedeemer,
+  SmartTokenMintingAction,
+}
 use utils.{apply_hashed_parameter}
 
 // ---------------------------------------------------------------------------
@@ -408,4 +412,193 @@ test registry_insert_fails_single_output() fail {
       outputs: [updated_covering_node_output()],
     }
   call_insert_validator(valid_insert_redeemer(), tx)
+}
+
+// =========================================================================
+// CIP-68 multi-asset registration
+//
+// is_programmable_token_registration now allows multiple asset names under
+// the same policy to support CIP-68 (FT label 333 + ref token label 100).
+// =========================================================================
+
+// CIP-67 label 333 (FT) prefix + "MyToken" hex
+const cip68_ft_name = #"000f41414d79546f6b656e"
+
+// CIP-67 label 100 (reference) prefix + "MyToken" hex
+const cip68_ref_name = #"000643b04d79546f6b656e"
+
+// Happy path: register with CIP-68 dual-token mint (FT + ref token)
+test registry_insert_cip68_dual_token_mint() {
+  let key = computed_key()
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [covering_node_input()],
+      outputs: [updated_covering_node_output(), inserted_node_output()],
+      reference_inputs: [issuance_ref_input()],
+      mint: from_asset(test_policy_id, key, 1)
+        |> assets.add(key, cip68_ft_name, 1_000_000)
+        |> assets.add(key, cip68_ref_name, 1),
+    }
+  call_insert_validator(valid_insert_redeemer(), tx)
+}
+
+// =========================================================================
+// Burn-during-registration (defense-in-depth)
+//
+// Burning tokens requires prior minting, which requires prior registration,
+// and the linked list prevents duplicate inserts — so this scenario is
+// logically impossible in practice. The amount > 0 check makes the
+// invariant explicit locally.
+// =========================================================================
+
+// Burn-only: no positive mint amount for the programmable token policy — must fail
+test registry_insert_fails_burn_only() fail {
+  let key = computed_key()
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [covering_node_input()],
+      outputs: [updated_covering_node_output(), inserted_node_output()],
+      reference_inputs: [issuance_ref_input()],
+      // Registry node NFT is minted, but programmable token policy only burns
+      mint: from_asset(test_policy_id, key, 1)
+        |> assets.add(key, #"746f6b656e", -100),
+    }
+  call_insert_validator(valid_insert_redeemer(), tx)
+}
+
+// Mixed mint+burn: one asset name positive, another negative — should pass
+// (at least one asset name has amount > 0)
+test registry_insert_mixed_mint_and_burn() {
+  let key = computed_key()
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      inputs: [covering_node_input()],
+      outputs: [updated_covering_node_output(), inserted_node_output()],
+      reference_inputs: [issuance_ref_input()],
+      mint: from_asset(test_policy_id, key, 1)
+        |> assets.add(key, cip68_ft_name, 1_000_000)
+        |> assets.add(key, #"6f6c64746f6b656e", -50),
+    }
+  call_insert_validator(valid_insert_redeemer(), tx)
+}
+
+// =========================================================================
+// CIP-68 subsequent mint (RefInput registry proof) in issuance_mint
+//
+// Exercises issuance_mint with CIP-68 dual-token mint + RefInput proof,
+// covering the path where the registry already exists from a prior insert.
+// =========================================================================
+
+// issuance_mint validator params
+const ism_plb_cred: Credential =
+  Script(#"aa11111111111111111111111111111111111111111111111111111111")
+
+const ism_registry_cs: PolicyId =
+  #"aa22222222222222222222222222222222222222222222222222222222"
+
+const ism_ml_cred: Credential =
+  Script(#"aa33333333333333333333333333333333333333333333333333333333")
+
+const ism_own_policy: PolicyId =
+  #"aa44444444444444444444444444444444444444444444444444444444"
+
+fn ism_registry_node_output() -> Output {
+  Output {
+    address: Address {
+      payment_credential: Script(
+        #"aa88888888888888888888888888888888888888888888888888888888",
+      ),
+      stake_credential: None,
+    },
+    value: min_ada
+      |> assets.add(ism_registry_cs, ism_own_policy, 1),
+    datum: InlineDatum(
+      as_data(
+        RegistryNode {
+          key: ism_own_policy,
+          next: #"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          transfer_logic_script: Script(
+            #"aa66666666666666666666666666666666666666666666666666666666",
+          ),
+          third_party_transfer_logic_script: Script(
+            #"aa77777777777777777777777777777777777777777777777777777777",
+          ),
+          global_state_cs: #"",
+        },
+      ),
+    ),
+    reference_script: None,
+  }
+}
+
+fn ism_ref_input() -> Input {
+  Input {
+    output_reference: OutputReference {
+      transaction_id: #"0000000000000000000000000000000000000000000000000000000000000000",
+      output_index: 0,
+    },
+    output: ism_registry_node_output(),
+  }
+}
+
+fn ism_plb_output(value: assets.Value) -> Output {
+  Output {
+    address: Address {
+      payment_credential: ism_plb_cred,
+      stake_credential: Some(
+        Inline(
+          Script(#"aa99999999999999999999999999999999999999999999999999999999"),
+        ),
+      ),
+    },
+    value,
+    datum: InlineDatum(Void),
+    reference_script: None,
+  }
+}
+
+fn call_issuance_validator(
+  rdmr: SmartTokenMintingAction,
+  tx: Transaction,
+) -> Bool {
+  issuance_mint.issuance_mint.mint(
+    ism_plb_cred,
+    ism_registry_cs,
+    ism_ml_cred,
+    rdmr,
+    ism_own_policy,
+    tx,
+  )
+}
+
+// CIP-68 subsequent mint with RefInput: FT + ref token, registry already exists
+test cip68_subsequent_mint_ref_input() {
+  let rdmr =
+    SmartTokenMintingAction {
+      minting_logic_cred: ism_ml_cred,
+      minting_registry_proof: RefInput(0),
+    }
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      reference_inputs: [ism_ref_input()],
+      outputs: [
+        ism_plb_output(
+          min_ada
+            |> assets.add(ism_own_policy, cip68_ft_name, 500),
+        ),
+        ism_plb_output(
+          min_ada
+            |> assets.add(ism_own_policy, cip68_ref_name, 1),
+        ),
+      ],
+      mint: from_asset(ism_own_policy, cip68_ft_name, 500)
+        |> assets.add(ism_own_policy, cip68_ref_name, 1),
+      withdrawals: [Pair(ism_ml_cred, 0)],
+      redeemers: [Pair(Mint(ism_own_policy), as_data(rdmr))],
+    }
+  call_issuance_validator(rdmr, tx)
 }

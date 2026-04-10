@@ -1008,3 +1008,189 @@ test case4_spend_and_mint_defers_to_plglobal() {
   // This passes at issuance_mint level — PLGlobal would reject it on-chain
   call_validator(rdmr, tx)
 }
+
+// ========================================================================
+// CIP-68 metadata token minting
+//
+// CIP-68 uses CIP-67 label prefixes on asset names:
+//   - Label 333 (FT user token):  0x000f4141 + asset_name
+//   - Label 100 (reference token): 0x000643b0 + asset_name
+//
+// Both tokens share the same policy ID (issuance_mint). The validator
+// should allow minting both in the same transaction since it does NOT
+// inspect asset name structure — only checks that all minted tokens
+// go to PLB addresses.
+// ========================================================================
+
+// "MyToken" in hex
+
+// CIP-67 label 333 (FT) prefix + asset name
+const cip68_ft_name = #"000f41414d79546f6b656e"
+
+// CIP-67 label 100 (reference) prefix + asset name
+const cip68_ref_name = #"000643b04d79546f6b656e"
+
+fn cip68_ft_output(qty: Int) -> Output {
+  Output {
+    address: Address {
+      payment_credential: test_plb_cred,
+      stake_credential: Some(
+        Inline(
+          Script(#"77777777777777777777777777777777777777777777777777777777"),
+        ),
+      ),
+    },
+    value: min_ada
+      |> assets.add(test_own_policy, cip68_ft_name, qty),
+    // Void datum — same as SDK's voidData() for user token outputs
+    datum: InlineDatum(Void),
+    reference_script: None,
+  }
+}
+
+fn cip68_ref_output() -> Output {
+  Output {
+    address: Address {
+      payment_credential: test_plb_cred,
+      stake_credential: Some(
+        Inline(
+          Script(#"77777777777777777777777777777777777777777777777777777777"),
+        ),
+      ),
+    },
+    value: min_ada
+      |> assets.add(test_own_policy, cip68_ref_name, 1),
+    // CIP-68 metadata datum — validator doesn't inspect datum content,
+    // just that the token goes to a PLB address. Use Void as placeholder.
+    datum: InlineDatum(Void),
+    reference_script: None,
+  }
+}
+
+// CIP-68 first mint: FT (label 333) + reference token (label 100), OutputIndex
+test cip68_first_mint_ft_and_ref_token() {
+  let rdmr =
+    SmartTokenMintingAction {
+      minting_logic_cred: test_ml_cred,
+      minting_registry_proof: OutputIndex(3),
+    }
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      outputs: [
+        // Output 0: FT user tokens to PLB
+        cip68_ft_output(1_000_000),
+        // Output 1: CIP-68 reference token to PLB (issuer)
+        cip68_ref_output(),
+        // Output 2: updated covering registry node (no own_policy tokens)
+        registry_node_output(
+          #"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ),
+        // Output 3: new registry node for this token
+        registry_node_output(test_own_policy),
+      ],
+      mint: from_asset(test_own_policy, cip68_ft_name, 1_000_000)
+        |> assets.add(test_own_policy, cip68_ref_name, 1),
+      withdrawals: [Pair(test_ml_cred, 0)],
+      redeemers: [Pair(Mint(test_own_policy), as_data(rdmr))],
+    }
+  call_validator(rdmr, tx)
+}
+
+// CIP-68 first mint: split FT + ref across separate PLB outputs
+test cip68_first_mint_split_outputs() {
+  let rdmr =
+    SmartTokenMintingAction {
+      minting_logic_cred: test_ml_cred,
+      minting_registry_proof: OutputIndex(2),
+    }
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      outputs: [
+        cip68_ft_output(500),
+        cip68_ref_output(),
+        registry_node_output(test_own_policy),
+      ],
+      mint: from_asset(test_own_policy, cip68_ft_name, 500)
+        |> assets.add(test_own_policy, cip68_ref_name, 1),
+      withdrawals: [Pair(test_ml_cred, 0)],
+      redeemers: [Pair(Mint(test_own_policy), as_data(rdmr))],
+    }
+  call_validator(rdmr, tx)
+}
+
+// CIP-68 first mint: both tokens in single PLB output (combined)
+test cip68_first_mint_combined_output() {
+  let combined_output =
+    Output {
+      address: Address {
+        payment_credential: test_plb_cred,
+        stake_credential: Some(
+          Inline(
+            Script(#"77777777777777777777777777777777777777777777777777777777"),
+          ),
+        ),
+      },
+      value: min_ada
+        |> assets.add(test_own_policy, cip68_ft_name, 500)
+        |> assets.add(test_own_policy, cip68_ref_name, 1),
+      datum: NoDatum,
+      reference_script: None,
+    }
+  let rdmr =
+    SmartTokenMintingAction {
+      minting_logic_cred: test_ml_cred,
+      minting_registry_proof: OutputIndex(1),
+    }
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      outputs: [combined_output, registry_node_output(test_own_policy)],
+      mint: from_asset(test_own_policy, cip68_ft_name, 500)
+        |> assets.add(test_own_policy, cip68_ref_name, 1),
+      withdrawals: [Pair(test_ml_cred, 0)],
+      redeemers: [Pair(Mint(test_own_policy), as_data(rdmr))],
+    }
+  call_validator(rdmr, tx)
+}
+
+// CIP-68: ref token escapes to non-PLB — must fail
+test cip68_ref_token_escapes_non_plb_fails() fail {
+  let non_plb_ref =
+    Output {
+      address: Address {
+        payment_credential: Script(
+          #"99999999999999999999999999999999999999999999999999999999",
+        ),
+        stake_credential: Some(
+          Inline(
+            Script(#"77777777777777777777777777777777777777777777777777777777"),
+          ),
+        ),
+      },
+      value: min_ada
+        |> assets.add(test_own_policy, cip68_ref_name, 1),
+      datum: NoDatum,
+      reference_script: None,
+    }
+  let rdmr =
+    SmartTokenMintingAction {
+      minting_logic_cred: test_ml_cred,
+      minting_registry_proof: OutputIndex(2),
+    }
+  let tx =
+    Transaction {
+      ..transaction.placeholder,
+      outputs: [
+        cip68_ft_output(500),
+        non_plb_ref,
+        registry_node_output(test_own_policy),
+      ],
+      mint: from_asset(test_own_policy, cip68_ft_name, 500)
+        |> assets.add(test_own_policy, cip68_ref_name, 1),
+      withdrawals: [Pair(test_ml_cred, 0)],
+      redeemers: [Pair(Mint(test_own_policy), as_data(rdmr))],
+    }
+  call_validator(rdmr, tx)
+}
