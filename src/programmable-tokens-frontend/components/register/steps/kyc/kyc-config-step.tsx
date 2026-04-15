@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { apiPost } from '@/lib/api/client';
 import { getSigningEntityVkey } from '@/lib/api/keri';
 import { useProtocolVersion } from '@/contexts/protocol-version-context';
+import { waitForTxConfirmation } from '@/lib/utils/tx-confirmation';
 import type { StepComponentProps } from '@/types/registration';
 
 interface KycConfigData {
@@ -219,8 +220,27 @@ export function KycConfigStep({
       const telPolicyId = response.metadata?.bootstrapParameters || '';
 
       showToast({
-        title: 'Global State Created',
-        description: `On-chain state initialized. Tx: ${txHash.slice(0, 16)}...`,
+        title: 'Global State Submitted',
+        description: `Tx: ${txHash.slice(0, 16)}... — waiting for on-chain confirmation`,
+        variant: 'success',
+      });
+
+      // 5. Wait for Blockfrost to see the transaction before proceeding
+      setStatusMessage('Waiting for on-chain confirmation...');
+      await waitForTxConfirmation(txHash, {
+        pollInterval: 10000,
+        timeout: 300000,
+        onPoll: (attempt, elapsed) => {
+          const elapsedSec = Math.round(elapsed / 1000);
+          setStatusMessage(
+            `Waiting for on-chain confirmation... (attempt ${attempt}, ${elapsedSec}s elapsed)`
+          );
+        },
+      });
+
+      showToast({
+        title: 'Global State Confirmed',
+        description: 'On-chain state confirmed and visible. Proceeding to token registration.',
         variant: 'success',
       });
 
