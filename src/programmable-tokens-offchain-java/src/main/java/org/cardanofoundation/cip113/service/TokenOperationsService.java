@@ -82,7 +82,7 @@ public class TokenOperationsService {
             case KycRegisterRequest kycRequest -> {
                 var handler = handlerFactory.getHandler("kyc", KycContext.builder()
                         .issuerAdminPkh(kycRequest.getAdminPubKeyHash())
-                        .telPolicyId(kycRequest.getTelPolicyId())
+                        .globalStatePolicyId(kycRequest.getGlobalStatePolicyId())
                         .build());
                 var basicOps = (BasicOperations<KycRegisterRequest>) handler.asBasicOperations()
                         .orElseThrow(() -> new UnsupportedOperationException("kyc does not support basic operations"));
@@ -131,7 +131,7 @@ public class TokenOperationsService {
             case KycRegisterRequest kycRequest -> {
                 var handler = handlerFactory.getHandler("kyc", KycContext.builder()
                         .issuerAdminPkh(kycRequest.getAdminPubKeyHash())
-                        .telPolicyId(kycRequest.getTelPolicyId())
+                        .globalStatePolicyId(kycRequest.getGlobalStatePolicyId())
                         .build());
                 var basicOps = (BasicOperations<KycRegisterRequest>) handler.asBasicOperations()
                         .orElseThrow(() -> new UnsupportedOperationException("kyc does not support basic operations"));
@@ -191,10 +191,10 @@ public class TokenOperationsService {
                         .orElseThrow(() -> new RuntimeException("could not find KYC token registration data"));
                 yield KycContext.builder()
                         .issuerAdminPkh(kycData.getIssuerAdminPkh())
-                        .telPolicyId(kycData.getTelInit().getTelNodePolicyId())
-                        .telInitTxInput(TransactionInput.builder()
-                                .transactionId(kycData.getTelInit().getTxHash())
-                                .index(kycData.getTelInit().getOutputIndex())
+                        .globalStatePolicyId(kycData.getGlobalStateInit().getGlobalStatePolicyId())
+                        .globalStateInitTxInput(TransactionInput.builder()
+                                .transactionId(kycData.getGlobalStateInit().getTxHash())
+                                .index(kycData.getGlobalStateInit().getOutputIndex())
                                 .build())
                         .build();
             }
@@ -266,10 +266,10 @@ public class TokenOperationsService {
                         .orElseThrow(() -> new RuntimeException("could not find KYC token registration data"));
                 yield KycContext.builder()
                         .issuerAdminPkh(kycData.getIssuerAdminPkh())
-                        .telPolicyId(kycData.getTelInit().getTelNodePolicyId())
-                        .telInitTxInput(TransactionInput.builder()
-                                .transactionId(kycData.getTelInit().getTxHash())
-                                .index(kycData.getTelInit().getOutputIndex())
+                        .globalStatePolicyId(kycData.getGlobalStateInit().getGlobalStatePolicyId())
+                        .globalStateInitTxInput(TransactionInput.builder()
+                                .transactionId(kycData.getGlobalStateInit().getTxHash())
+                                .index(kycData.getGlobalStateInit().getOutputIndex())
                                 .build())
                         .build();
             }
@@ -344,10 +344,10 @@ public class TokenOperationsService {
                         .orElseThrow(() -> new RuntimeException("could not find KYC token registration data"));
                 yield KycContext.builder()
                         .issuerAdminPkh(kycData.getIssuerAdminPkh())
-                        .telPolicyId(kycData.getTelInit().getTelNodePolicyId())
-                        .telInitTxInput(TransactionInput.builder()
-                                .transactionId(kycData.getTelInit().getTxHash())
-                                .index(kycData.getTelInit().getOutputIndex())
+                        .globalStatePolicyId(kycData.getGlobalStateInit().getGlobalStatePolicyId())
+                        .globalStateInitTxInput(TransactionInput.builder()
+                                .transactionId(kycData.getGlobalStateInit().getTxHash())
+                                .index(kycData.getGlobalStateInit().getOutputIndex())
                                 .build())
                         .build();
             }

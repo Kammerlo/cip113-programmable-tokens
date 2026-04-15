@@ -59,7 +59,7 @@ export interface SeizeTokensRequest {
 export type SeizeTokensResponse = TransactionContextResponse<void>;
 
 // ============================================================================
-// Whitelist (TEL) Management
+// Whitelist (Global State) Management
 // ============================================================================
 
 export interface WhitelistInitRequest {
@@ -96,7 +96,7 @@ export type WhitelistOperationResponse = TransactionContextResponse<void>;
 // Global State Management
 // ============================================================================
 
-export type GlobalStateAction = 'PAUSE_TRANSFERS' | 'UPDATE_MINTABLE_AMOUNT' | 'MODIFY_SECURITY_INFO';
+export type GlobalStateAction = 'PAUSE_TRANSFERS' | 'UPDATE_MINTABLE_AMOUNT' | 'MODIFY_SECURITY_INFO' | 'MODIFY_TRUSTED_ENTITIES';
 
 export interface GlobalStateUpdateRequest {
   adminAddress: string;
@@ -105,9 +105,22 @@ export interface GlobalStateUpdateRequest {
   transfersPaused?: boolean;       // for PAUSE_TRANSFERS
   mintableAmount?: number;         // for UPDATE_MINTABLE_AMOUNT
   securityInfo?: string;           // for MODIFY_SECURITY_INFO (hex bytes)
+  trustedEntities?: string[];      // for MODIFY_TRUSTED_ENTITIES (full replacement list of 64-char hex vkeys)
 }
 
 export type GlobalStateUpdateResponse = TransactionContextResponse<void>;
+
+// ============================================================================
+// Global State Read
+// ============================================================================
+
+export interface GlobalStateData {
+  policyId: string;
+  transfersPaused: boolean;
+  mintableAmount: number;
+  trustedEntities: string[];       // hex vkeys (64 chars each)
+  securityInfo: string | null;     // hex or null
+}
 
 // ============================================================================
 // Shared Types

@@ -309,7 +309,34 @@ export function TransferModal({
                   </div>
                   {kycProof ? (
                     <div className="flex items-center gap-2">
-                      <Badge variant="success" size="sm">Verified</Badge>
+                      <div className="relative group">
+                        <Badge variant="success" size="sm" className="cursor-help">Verified</Badge>
+                        <div className="absolute right-0 top-full mt-2 w-80 p-3 bg-dark-900 border border-dark-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
+                          <p className="text-xs font-semibold text-white mb-2">KYC Proof Details</p>
+                          <div className="space-y-1.5">
+                            <div>
+                              <p className="text-[10px] text-dark-500 uppercase tracking-wide">Role</p>
+                              <p className="text-xs text-white">{kycProof.roleName} ({kycProof.role})</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-dark-500 uppercase tracking-wide">Valid Until</p>
+                              <p className="text-xs text-white">{new Date(kycProof.validUntilMs).toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-dark-500 uppercase tracking-wide">Payload</p>
+                              <p className="text-[10px] text-primary-400 font-mono break-all">{kycProof.payloadHex}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-dark-500 uppercase tracking-wide">Signature</p>
+                              <p className="text-[10px] text-primary-400 font-mono break-all">{kycProof.signatureHex}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-dark-500 uppercase tracking-wide">Entity Vkey</p>
+                              <p className="text-[10px] text-primary-400 font-mono break-all">{kycProof.entityVkeyHex}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                       <button
                         type="button"
                         onClick={() => {

@@ -7,7 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Entity representing TEL (Trusted Entity List) global state initialization data.
+ * Entity representing Global State initialization data.
  * Stores the one-shot minting policy ID and bootstrap parameters for rebuilding
  * the global state scripts.
  */
@@ -19,17 +19,17 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class TelInitEntity {
+public class GlobalStateInitEntity {
 
     /**
      * Policy ID of the global state NFT (= one-shot minting policy ID).
      */
     @Id
     @Column(name = "tel_node_policy_id", nullable = false, length = 56)
-    private String telNodePolicyId;
+    private String globalStatePolicyId;
 
     /**
-     * Public key hash of the admin who manages this TEL.
+     * Public key hash of the admin who manages this global state.
      */
     @Column(name = "admin_pkh", nullable = false, length = 56)
     private String adminPkh;

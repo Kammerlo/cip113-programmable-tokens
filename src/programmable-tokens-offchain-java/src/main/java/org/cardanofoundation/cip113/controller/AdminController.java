@@ -179,13 +179,13 @@ public class AdminController {
                 String assetNameDisplay = hexToString(assetName);
                 String substandardId = registryEntry.map(ProgrammableTokenRegistryEntity::getSubstandardId).orElse("kyc");
 
-                String telPolicyId = token.getTelInit() != null ? token.getTelInit().getTelNodePolicyId() : null;
+                String globalStatePolicyId = token.getGlobalStateInit() != null ? token.getGlobalStateInit().getGlobalStatePolicyId() : null;
 
                 AdminTokenDetails details = new AdminTokenDetails(
                         null,
                         token.getIssuerAdminPkh(),
                         null,
-                        telPolicyId
+                        globalStatePolicyId
                 );
 
                 tokenMap.put(policyId, new AdminTokenInfo(
@@ -350,7 +350,7 @@ public class AdminController {
             String blacklistNodePolicyId,   // For freeze-and-seize
             String issuerAdminPkh,
             String blacklistAdminPkh,
-            String telPolicyId              // For kyc
+            String globalStatePolicyId       // For kyc
     ) {
     }
 

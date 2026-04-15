@@ -10,7 +10,7 @@ import lombok.ToString;
  *
  * Each KYC deployment has its own:
  * - Programmable token policy ID
- * - TEL global state policy ID (= global_state_cs in registry)
+ * - Global state policy ID (= global_state_cs in registry)
  * - Bootstrap parameters for rebuilding global state scripts
  * - Admin credentials for authorization
  *
@@ -30,16 +30,16 @@ public class KycContext implements SubstandardContext {
     private final String issuerAdminPkh;
 
     /**
-     * Policy ID of the TEL global state NFT (= one-shot minting policy ID).
+     * Policy ID of the global state NFT (= one-shot minting policy ID).
      * This is the same value stored in global_state_cs in the registry node.
      */
-    private final String telPolicyId;
+    private final String globalStatePolicyId;
 
     /**
      * The UTxO ref used to parameterize the global state one-shot minting policy.
      * Needed to rebuild global state scripts for add/remove operations.
      */
-    private final TransactionInput telInitTxInput;
+    private final TransactionInput globalStateInitTxInput;
 
     @Override
     public String getSubstandardId() {

@@ -1,7 +1,7 @@
 /**
  * KYC Substandard Flow
  * Token registration with KYC attestation requirements for transfers.
- * Requires a Trusted Entity List (TEL) to be created externally.
+ * Requires a Global State to be created externally.
  */
 
 import { registerFlow, isFlowEnabled } from '../flow-registry';
@@ -19,7 +19,7 @@ function KycSuccessStep(props: StepComponentProps) {
   const buildResult = props.wizardState.stepStates['kyc-build-sign']?.result?.data as {
     tokenPolicyId?: string;
     regTxHash?: string;
-    telPolicyId?: string;
+    globalStatePolicyId?: string;
   } | undefined;
 
   const enhancedResult = props.wizardState.finalResult || {
@@ -29,7 +29,7 @@ function KycSuccessStep(props: StepComponentProps) {
     assetName: '',
     quantity: '',
     metadata: {
-      telPolicyId: buildResult?.telPolicyId,
+      globalStatePolicyId: buildResult?.globalStatePolicyId,
     },
   };
 
@@ -39,7 +39,7 @@ function KycSuccessStep(props: StepComponentProps) {
 const kycFlow: RegistrationFlow = {
   id: 'kyc',
   name: 'KYC Token',
-  description: 'Programmable token requiring KYC attestation for transfers. Uses a Trusted Entity List (TEL) for verifying transfer authorization.',
+  description: 'Programmable token requiring KYC attestation for transfers. Uses a Global State for verifying transfer authorization.',
   enabled: isFlowEnabled('kyc', true),
   steps: [
     {
@@ -80,7 +80,7 @@ const kycFlow: RegistrationFlow = {
     } | undefined;
 
     const kycConfig = state.stepStates['kyc-config']?.data as {
-      telPolicyId?: string;
+      globalStatePolicyId?: string;
     } | undefined;
 
     return {
@@ -90,7 +90,7 @@ const kycFlow: RegistrationFlow = {
       quantity: tokenDetails?.quantity || '',
       recipientAddress: tokenDetails?.recipientAddress,
       adminPubKeyHash: '',
-      telPolicyId: kycConfig?.telPolicyId || '',
+      globalStatePolicyId: kycConfig?.globalStatePolicyId || '',
     };
   },
 };

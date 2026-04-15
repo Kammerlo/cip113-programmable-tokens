@@ -26,6 +26,7 @@ import org.cardanofoundation.signify.cesr.Serder;
 import org.cardanofoundation.signify.cesr.util.Utils;
 import org.cardanofoundation.signify.core.States;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -40,6 +41,7 @@ import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("${apiPrefix}/keri")
+@ConditionalOnProperty(name = "keri.enabled", havingValue = "true")
 @RequiredArgsConstructor
 @Slf4j
 public class KeriController {

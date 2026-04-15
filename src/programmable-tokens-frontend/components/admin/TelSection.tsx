@@ -109,7 +109,7 @@ export function TelSection({ tokens, adminAddress }: TelSectionProps) {
         variant: "success",
       });
     } catch (error) {
-      console.error("TEL error:", error);
+      console.error("Global state entity error:", error);
 
       let errorMessage = `Failed to ${action} trusted entity`;
       if (error instanceof Error) {

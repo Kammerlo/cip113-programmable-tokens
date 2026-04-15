@@ -24,9 +24,9 @@ public interface KycTokenRegistrationRepository extends JpaRepository<KycTokenRe
     List<KycTokenRegistrationEntity> findByIssuerAdminPkh(String issuerAdminPkh);
 
     /**
-     * Find all token registrations linked to a specific TEL.
+     * Find all token registrations linked to a specific global state.
      */
-    List<KycTokenRegistrationEntity> findByTelInit_TelNodePolicyId(String telNodePolicyId);
+    List<KycTokenRegistrationEntity> findByGlobalStateInit_GlobalStatePolicyId(String globalStatePolicyId);
 
     /**
      * Check if a token registration exists for the given policy ID.

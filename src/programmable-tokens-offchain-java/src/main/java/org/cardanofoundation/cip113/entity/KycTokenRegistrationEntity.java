@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * Entity representing KYC token registration data.
- * Links programmable tokens to their TEL global state initialization.
+ * Links programmable tokens to their global state initialization.
  */
 @Entity
 @Table(name = "kyc_token_registration")
@@ -32,11 +32,11 @@ public class KycTokenRegistrationEntity {
     private String issuerAdminPkh;
 
     /**
-     * Foreign key to the TEL init record.
+     * Foreign key to the global state init record.
      * The tel_policy_id column stores the global state minting policy ID.
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tel_policy_id", referencedColumnName = "tel_node_policy_id",
             foreignKey = @ForeignKey(name = "fk_tel_init"))
-    private TelInitEntity telInit;
+    private GlobalStateInitEntity globalStateInit;
 }

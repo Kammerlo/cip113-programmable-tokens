@@ -13,7 +13,7 @@ import { waitForTxConfirmation } from '@/lib/utils/tx-confirmation';
 import type { StepComponentProps } from '@/types/registration';
 
 interface KycConfigData {
-  telPolicyId: string;
+  globalStatePolicyId: string;
 }
 
 interface WhitelistInitResponse {
@@ -83,7 +83,7 @@ export function KycConfigStep({
       }
       // BrowserWallet.signData(payload, address) — payload first, address second
       // convertFromUTF8 defaults to true so a plain string works fine
-      const dataSignature = await wallet.signData('CIP113-TEL-INIT', address);
+      const dataSignature = await wallet.signData('CIP113-GLOBAL-STATE-INIT', address);
       const vkey = extractVkeyFromCoseKey(dataSignature.key);
       if (vkey) {
         setOwnVkey(vkey);
@@ -217,7 +217,7 @@ export function KycConfigStep({
       const signedTx = await wallet.signTx(response.unsignedCborTx, true);
       const txHash = await wallet.submitTx(signedTx);
 
-      const telPolicyId = response.metadata?.bootstrapParameters || '';
+      const globalStatePolicyId = response.metadata?.bootstrapParameters || '';
 
       showToast({
         title: 'Global State Submitted',
@@ -244,10 +244,10 @@ export function KycConfigStep({
         variant: 'success',
       });
 
-      onDataChange({ telPolicyId });
+      onDataChange({ globalStatePolicyId });
       onComplete({
         stepId: 'kyc-config',
-        data: { telPolicyId },
+        data: { globalStatePolicyId },
         completedAt: Date.now(),
       });
     } catch (error) {

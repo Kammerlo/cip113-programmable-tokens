@@ -45,11 +45,11 @@ export interface FreezeAndSeizeRegisterRequest extends BaseRegisterTokenRequest 
   blacklistNodePolicyId: string;   // From blacklist initialization step
 }
 
-/** KYC substandard - requires TEL policy ID */
+/** KYC substandard - requires Global State policy ID */
 export interface KycRegisterRequest extends BaseRegisterTokenRequest {
   substandardId: 'kyc';
   adminPubKeyHash: string;         // Payment key hash derived from feePayerAddress
-  telPolicyId: string;             // Trusted Entity List policy ID
+  globalStatePolicyId: string;     // Global State policy ID
 }
 
 /** Discriminated union of all registration request types */

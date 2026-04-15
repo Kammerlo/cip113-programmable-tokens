@@ -10,6 +10,7 @@ import com.bloxbean.cardano.client.plutus.spec.*;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
 import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.transaction.spec.*;
+import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import com.bloxbean.cardano.client.util.HexUtil;
 import com.easy1staking.cardano.comparator.TransactionInputComparator;
 import com.easy1staking.cardano.comparator.UtxoComparator;
@@ -23,7 +24,7 @@ import org.cardanofoundation.conversions.CardanoConverters;
 import org.cardanofoundation.cip113.config.AppConfig;
 import org.cardanofoundation.cip113.entity.KycTokenRegistrationEntity;
 import org.cardanofoundation.cip113.entity.ProgrammableTokenRegistryEntity;
-import org.cardanofoundation.cip113.entity.TelInitEntity;
+import org.cardanofoundation.cip113.entity.GlobalStateInitEntity;
 import org.cardanofoundation.cip113.model.*;
 import org.cardanofoundation.cip113.model.TransactionContext.RegistrationResult;
 import org.cardanofoundation.cip113.model.bootstrap.ProtocolBootstrapParams;
@@ -33,7 +34,7 @@ import com.bloxbean.cardano.yaci.core.model.certs.CertificateType;
 import org.cardanofoundation.cip113.repository.CustomStakeRegistrationRepository;
 import org.cardanofoundation.cip113.repository.KycTokenRegistrationRepository;
 import org.cardanofoundation.cip113.repository.ProgrammableTokenRegistryRepository;
-import org.cardanofoundation.cip113.repository.TelInitRepository;
+import org.cardanofoundation.cip113.repository.GlobalStateInitRepository;
 import org.cardanofoundation.cip113.service.*;
 import org.cardanofoundation.cip113.service.substandard.capabilities.BasicOperations;
 import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable;
@@ -61,7 +62,7 @@ import static java.math.BigInteger.ONE;
  * </ul>
  *
  * <p>During transfer, the sender must provide a valid KYC attestation (payload + signature)
- * from a trusted entity whose verification key is in the Trusted Entity List (TEL).</p>
+ * from a trusted entity whose verification key is in the global state's Trusted Entity List.</p>
  *
  * <p>This handler requires a {@link KycContext} to be set before use for mint/transfer
  * operations, as there can be multiple KYC token deployments.</p>
@@ -86,7 +87,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
     private final HybridUtxoSupplier hybridUtxoSupplier;
     private final KycTokenRegistrationRepository kycTokenRegistrationRepository;
     private final ProgrammableTokenRegistryRepository programmableTokenRegistryRepository;
-    private final TelInitRepository telInitRepository;
+    private final GlobalStateInitRepository globalStateInitRepository;
     private final CustomStakeRegistrationRepository stakeRegistrationRepository;
     private final UtxoProvider utxoProvider;
     private final CardanoConverters cardanoConverters;
@@ -116,12 +117,12 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
 
         try {
             var adminPkh = Credential.fromKey(request.getAdminPubKeyHash());
-            var telPolicyId = request.getTelPolicyId();
+            var globalStatePolicyId =request.getGlobalStatePolicyId();
 
             List<Utxo> feePayerUtxos;
             if (request.getChainingTransactionCborHex() != null) {
                 var chainingTxBytes = HexUtil.decodeHexString(request.getChainingTransactionCborHex());
-                var chainingTxHash = com.bloxbean.cardano.client.transaction.util.TransactionUtil.getTxHash(chainingTxBytes);
+                var chainingTxHash = TransactionUtil.getTxHash(chainingTxBytes);
                 var chainingTx = Transaction.deserialize(chainingTxBytes);
 
                 var chainingTxOutputs = chainingTx.getBody().getOutputs();
@@ -168,13 +169,13 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             var issuanceUtxo = issuanceUtxoOpt.get();
 
             // Build KYC substandard scripts
-            var substandardIssueContract = kycScriptBuilder.buildIssueScript(telPolicyId, Credential.fromKey(request.getAdminPubKeyHash()));
+            var substandardIssueContract = kycScriptBuilder.buildIssueScript(globalStatePolicyId, Credential.fromKey(request.getAdminPubKeyHash()));
             var substandardIssueAddress = AddressProvider.getRewardAddress(substandardIssueContract, network.getCardanoNetwork());
             log.info("KYC substandardIssueAddress: {}", substandardIssueAddress.getAddress());
 
             var substandardTransferContract = kycScriptBuilder.buildTransferScript(
                     protocolParams.programmableLogicBaseParams().scriptHash(),
-                    telPolicyId
+                    globalStatePolicyId
             );
             var substandardTransferAddress = AddressProvider.getRewardAddress(substandardTransferContract, network.getCardanoNetwork());
             log.info("KYC substandardTransferAddress: {}", substandardTransferAddress.getAddress());
@@ -246,7 +247,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     existingRegistryNodeDatum.next(),
                     HexUtil.encodeHexString(substandardTransferContract.getScriptHash()),
                     HexUtil.encodeHexString(substandardIssueContract.getScriptHash()),
-                    telPolicyId);
+                    globalStatePolicyId);
 
             Value directoryMintValue = Value.builder()
                     .coin(Amount.ada(1).getQuantity())
@@ -346,17 +347,17 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     .ignoreScriptCostEvaluationError(false)
                     .build();
 
-            log.info("KYC registration tx: {}", transaction.serializeToHex());
+            log.debug("KYC registration tx: {}", transaction.serializeToHex());
 
             // Save KYC-specific registration data
-            // Look up the TelInitEntity for the TEL policy ID
-            var telInitEntity = telInitRepository.findByTelNodePolicyId(telPolicyId)
-                    .orElseThrow(() -> new RuntimeException("TEL init not found for policy ID: " + telPolicyId));
+            // Look up the GlobalStateInitEntity for the global state policy ID
+            var globalStateInitEntity =globalStateInitRepository.findByGlobalStatePolicyId(globalStatePolicyId)
+                    .orElseThrow(() -> new RuntimeException("Global state init not found for policy ID: " + globalStatePolicyId));
 
             kycTokenRegistrationRepository.save(KycTokenRegistrationEntity.builder()
                     .programmableTokenPolicyId(progTokenPolicyId)
                     .issuerAdminPkh(HexUtil.encodeHexString(adminPkh.getBytes()))
-                    .telInit(telInitEntity)
+                    .globalStateInit(globalStateInitEntity)
                     .build());
 
             // Save to unified programmable token registry
@@ -391,7 +392,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             var issuanceUtxo = issuanceUtxoOpt.get();
 
             var adminPkh = Credential.fromKey(context.getIssuerAdminPkh());
-            var substandardIssueContract = kycScriptBuilder.buildIssueScript(context.getTelPolicyId(), Credential.fromKey(context.getIssuerAdminPkh()));
+            var substandardIssueContract = kycScriptBuilder.buildIssueScript(context.getGlobalStatePolicyId(), Credential.fromKey(context.getIssuerAdminPkh()));
             var substandardIssueAddress = AddressProvider.getRewardAddress(substandardIssueContract, network.getCardanoNetwork());
 
             var issuanceContract = protocolScriptBuilderService.getParameterizedIssuanceMintScript(protocolParams, substandardIssueContract);
@@ -459,7 +460,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
         try {
             var senderAddress = new Address(request.senderAddress());
             var receiverAddress = new Address(request.recipientAddress());
-            var telPolicyId = context.getTelPolicyId();
+            var globalStatePolicyId =context.getGlobalStatePolicyId();
 
             // Validate KYC proof data is present
             if (request.kycPayload() == null || request.kycPayload().isBlank()) {
@@ -516,20 +517,18 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             // KYC transfer script
             var parameterisedTransferContract = kycScriptBuilder.buildTransferScript(
                     protocolParams.programmableLogicBaseParams().scriptHash(),
-                    telPolicyId
+                    globalStatePolicyId
             );
             var substandardTransferAddress = AddressProvider.getRewardAddress(parameterisedTransferContract, network.getCardanoNetwork());
 
             // Find global state UTxO for reference input (contains trusted entity list)
             var globalStateScripts = kycScriptBuilder.buildGlobalStateScripts(
-                    context.getTelInitTxInput(), context.getIssuerAdminPkh());
+                    context.getGlobalStateInitTxInput(), context.getIssuerAdminPkh());
             var globalStateSpendScript = globalStateScripts.second();
             var globalStateSpendAddress = AddressProvider.getEntAddress(globalStateSpendScript, network.getCardanoNetwork());
-            var globalStatePolicyId = globalStateScripts.first().getPolicyId();
-
             var globalStateUtxo = findGlobalStateUtxo(globalStateSpendAddress.getAddress(), globalStatePolicyId);
             if (globalStateUtxo == null) {
-                return TransactionContext.typedError("could not find global state UTxO for TEL");
+                return TransactionContext.typedError("could not find global state UTxO for global state");
             }
 
             // Select input UTxOs for the transfer
@@ -679,7 +678,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
         }
     }
 
-    // ========== WhitelistManageable Implementation (TEL Global State) ==========
+    // ========== WhitelistManageable Implementation (WhitelistManageable (Global State)) ==========
 
     @Override
     public TransactionContext<WhitelistInitResult> buildWhitelistInitTransaction(
@@ -687,7 +686,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             ProtocolBootstrapParams protocolParams) {
 
         try {
-            log.info("TEL init request: tokenPolicyId={}, admin={}", request.tokenPolicyId(), request.adminAddress());
+            log.info("Global state init request: tokenPolicyId={}, admin={}", request.tokenPolicyId(), request.adminAddress());
 
             var adminAddress = new Address(request.adminAddress());
             var adminPkhBytes = adminAddress.getPaymentCredentialHash().get();
@@ -723,7 +722,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                 for (var vkeyHex : request.initialVkeys()) {
                     if (vkeyHex != null && vkeyHex.trim().length() == 64) {
                         trustedEntities.add(BytesPlutusData.of(HexUtil.decodeHexString(vkeyHex.trim())));
-                        log.info("TEL init adding trusted entity vkey: {}...{}", vkeyHex.substring(0, 8), vkeyHex.substring(56));
+                        log.info("Global state init adding trusted entity vkey: {}...{}", vkeyHex.substring(0, 8), vkeyHex.substring(56));
                     }
                 }
             }
@@ -760,12 +759,12 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
 
             // Build issue and transfer scripts to register their stake addresses
             var adminCredential = Credential.fromKey(adminPkh);
-            var telPolicyId = globalStateMintScript.getPolicyId();
-            var substandardIssueContract = kycScriptBuilder.buildIssueScript(telPolicyId, adminCredential);
+            var globalStatePolicyId =globalStateMintScript.getPolicyId();
+            var substandardIssueContract = kycScriptBuilder.buildIssueScript(globalStatePolicyId, adminCredential);
             var substandardIssueAddress = AddressProvider.getRewardAddress(substandardIssueContract, network.getCardanoNetwork());
 
             var substandardTransferContract = kycScriptBuilder.buildTransferScript(
-                    protocolParams.programmableLogicBaseParams().scriptHash(), telPolicyId);
+                    protocolParams.programmableLogicBaseParams().scriptHash(), globalStatePolicyId);
             var substandardTransferAddress = AddressProvider.getRewardAddress(substandardTransferContract, network.getCardanoNetwork());
 
             // Register stake addresses for issue and transfer scripts
@@ -806,20 +805,20 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
 
             log.info("Global state init tx: {}", transaction.serializeToHex());
 
-            // Save TEL init entity (upsert — a previous failed attempt may have saved one already)
+            // Save Global state init entity (upsert — a previous failed attempt may have saved one already)
             var policyId = globalStateMintScript.getPolicyId();
-            var existing = telInitRepository.findByTelNodePolicyId(policyId);
+            var existing = globalStateInitRepository.findByGlobalStatePolicyId(policyId);
             if (existing.isEmpty()) {
                 // Remove any stale record with the same bootstrap UTxO (from a prior attempt
                 // that produced a different policy ID, e.g. different output index selection)
-                telInitRepository.findByAdminPkh(adminPkh).stream()
+                globalStateInitRepository.findByAdminPkh(adminPkh).stream()
                         .filter(e -> e.getTxHash().equals(bootstrapUtxo.getTxHash())
                                 && e.getOutputIndex().equals(bootstrapUtxo.getOutputIndex()))
-                        .forEach(telInitRepository::delete);
-                telInitRepository.flush();
+                        .forEach(globalStateInitRepository::delete);
+                globalStateInitRepository.flush();
 
-                telInitRepository.save(TelInitEntity.builder()
-                        .telNodePolicyId(policyId)
+                globalStateInitRepository.save(GlobalStateInitEntity.builder()
+                        .globalStatePolicyId(policyId)
                         .adminPkh(adminPkh)
                         .txHash(bootstrapUtxo.getTxHash())
                         .outputIndex(bootstrapUtxo.getOutputIndex())
@@ -830,7 +829,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     new WhitelistInitResult(globalStateMintScript.getPolicyId()));
 
         } catch (Exception e) {
-            log.error("TEL init error", e);
+            log.error("Global state init error", e);
             return TransactionContext.typedError("error: " + e.getMessage());
         }
     }
@@ -841,7 +840,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             ProtocolBootstrapParams protocolParams) {
 
         try {
-            log.info("TEL add entity: policyId={}, vkey={}", request.policyId(), request.targetCredential());
+            log.info("Global state add entity: policyId={}, vkey={}", request.policyId(), request.targetCredential());
 
             var vkeyHex = request.targetCredential().trim();
             if (vkeyHex.length() != 64) {
@@ -850,7 +849,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
 
             // Rebuild global state scripts from context
             var globalStateScripts = kycScriptBuilder.buildGlobalStateScripts(
-                    context.getTelInitTxInput(), context.getIssuerAdminPkh());
+                    context.getGlobalStateInitTxInput(), context.getIssuerAdminPkh());
             var globalStateMintScript = globalStateScripts.first();
             var globalStateSpendScript = globalStateScripts.second();
 
@@ -864,7 +863,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             }
 
             // Parse current datum to get existing trusted entity list
-            var currentDatum = globalStateUtxo.getInlineDatum();
+            var currentDatum = deserializeGlobalStateDatum(globalStateUtxo);
             var currentEntities = parseTrustedEntitiesFromDatum(currentDatum);
 
             // Append new vkey to list
@@ -884,25 +883,38 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             // Find admin UTxOs for fee payment
             var adminUtxos = accountService.findAdaOnlyUtxo(request.adminAddress(), 10_000_000L);
 
+            var inputValue = globalStateUtxo.toValue();
+            var scriptAddr = globalStateSpendAddress.getAddress();
+
             var tx = new Tx()
                     .collectFrom(adminUtxos)
                     .collectFrom(globalStateUtxo, spendRedeemer)
-                    .payToContract(globalStateSpendAddress.getAddress(),
+                    .payToContract(scriptAddr,
                             globalStateUtxo.getAmount(), updatedDatum)
                     .attachSpendingValidator(globalStateSpendScript)
                     .withChangeAddress(request.adminAddress());
+
+            // Register the global state UTxO in the hybrid supplier so the Aiken evaluator
+            // can resolve it with full inline datum data during script cost evaluation
+            hybridUtxoSupplier.add(globalStateUtxo);
 
             var transaction = quickTxBuilder.compose(tx)
                     .withRequiredSigners(HexUtil.decodeHexString(context.getIssuerAdminPkh()))
                     .feePayer(request.adminAddress())
                     .mergeOutputs(false)
+                    .preBalanceTx((txBuilderContext, transaction1) -> {
+                        ensureGlobalStateOutputFirst(transaction1, request.adminAddress());
+                    })
+                    .postBalanceTx((txBuilderContext, transaction1) -> {
+                        restoreGlobalStateOutputValue(transaction1, scriptAddr, inputValue);
+                    })
                     .build();
 
-            log.info("TEL add entity tx: {}", transaction.serializeToHex());
+            log.info("Global state add entity tx: {}", transaction.serializeToHex());
             return TransactionContext.ok(transaction.serializeToHex());
 
         } catch (Exception e) {
-            log.error("TEL add entity error", e);
+            log.error("Global state add entity error", e);
             return TransactionContext.typedError("error: " + e.getMessage());
         }
     }
@@ -913,13 +925,13 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             ProtocolBootstrapParams protocolParams) {
 
         try {
-            log.info("TEL remove entity: policyId={}, vkey={}", request.policyId(), request.targetCredential());
+            log.info("Global state remove entity: policyId={}, vkey={}", request.policyId(), request.targetCredential());
 
             var vkeyHex = request.targetCredential().trim();
 
             // Rebuild global state scripts from context
             var globalStateScripts = kycScriptBuilder.buildGlobalStateScripts(
-                    context.getTelInitTxInput(), context.getIssuerAdminPkh());
+                    context.getGlobalStateInitTxInput(), context.getIssuerAdminPkh());
             var globalStateMintScript = globalStateScripts.first();
             var globalStateSpendScript = globalStateScripts.second();
 
@@ -933,7 +945,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             }
 
             // Parse current datum and remove the vkey
-            var currentDatum = globalStateUtxo.getInlineDatum();
+            var currentDatum = deserializeGlobalStateDatum(globalStateUtxo);
             var currentEntities = parseTrustedEntitiesFromDatum(currentDatum);
 
             var targetBytes = BytesPlutusData.of(HexUtil.decodeHexString(vkeyHex));
@@ -963,25 +975,38 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             // Find admin UTxOs for fee payment
             var adminUtxos = accountService.findAdaOnlyUtxo(request.adminAddress(), 10_000_000L);
 
+            var inputValue = globalStateUtxo.toValue();
+            var scriptAddr = globalStateSpendAddress.getAddress();
+
             var tx = new Tx()
                     .collectFrom(adminUtxos)
                     .collectFrom(globalStateUtxo, spendRedeemer)
-                    .payToContract(globalStateSpendAddress.getAddress(),
+                    .payToContract(scriptAddr,
                             globalStateUtxo.getAmount(), updatedDatum)
                     .attachSpendingValidator(globalStateSpendScript)
                     .withChangeAddress(request.adminAddress());
+
+            // Register the global state UTxO in the hybrid supplier so the Aiken evaluator
+            // can resolve it with full inline datum data during script cost evaluation
+            hybridUtxoSupplier.add(globalStateUtxo);
 
             var transaction = quickTxBuilder.compose(tx)
                     .withRequiredSigners(HexUtil.decodeHexString(context.getIssuerAdminPkh()))
                     .feePayer(request.adminAddress())
                     .mergeOutputs(false)
+                    .preBalanceTx((txBuilderContext, transaction1) -> {
+                        ensureGlobalStateOutputFirst(transaction1, request.adminAddress());
+                    })
+                    .postBalanceTx((txBuilderContext, transaction1) -> {
+                        restoreGlobalStateOutputValue(transaction1, scriptAddr, inputValue);
+                    })
                     .build();
 
-            log.info("TEL remove entity tx: {}", transaction.serializeToHex());
+            log.info("Global state remove entity tx: {}", transaction.serializeToHex());
             return TransactionContext.ok(transaction.serializeToHex());
 
         } catch (Exception e) {
-            log.error("TEL remove entity error", e);
+            log.error("Global state remove entity error", e);
             return TransactionContext.typedError("error: " + e.getMessage());
         }
     }
@@ -998,7 +1023,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
 
             // Rebuild global state scripts from context
             var globalStateScripts = kycScriptBuilder.buildGlobalStateScripts(
-                    context.getTelInitTxInput(), context.getIssuerAdminPkh());
+                    context.getGlobalStateInitTxInput(), context.getIssuerAdminPkh());
             var globalStateMintScript = globalStateScripts.first();
             var globalStateSpendScript = globalStateScripts.second();
 
@@ -1011,7 +1036,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                 return TransactionContext.typedError("Global state UTxO not found");
             }
 
-            var currentDatum = globalStateUtxo.getInlineDatum();
+            var currentDatum = deserializeGlobalStateDatum(globalStateUtxo);
 
             // Build updated datum and typed redeemer based on action
             ConstrPlutusData updatedDatum;
@@ -1043,6 +1068,18 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     var action = ConstrPlutusData.of(2, infoData);
                     spendRedeemer = ConstrPlutusData.of(0, BigIntPlutusData.of(BigInteger.ZERO), action);
                 }
+                case MODIFY_TRUSTED_ENTITIES -> {
+                    var newEntities = ListPlutusData.of();
+                    if (request.trustedEntities() != null) {
+                        for (var vkey : request.trustedEntities()) {
+                            newEntities.add(BytesPlutusData.of(HexUtil.decodeHexString(vkey.trim())));
+                        }
+                    }
+                    updatedDatum = buildGlobalStateDatumWithEntities(currentDatum, newEntities);
+                    // ModifyTrustedEntities = constructor index 3
+                    var action = ConstrPlutusData.of(3, newEntities);
+                    spendRedeemer = ConstrPlutusData.of(0, BigIntPlutusData.of(BigInteger.ZERO), action);
+                }
                 default -> {
                     return TransactionContext.typedError("Unknown global state action: " + request.action());
                 }
@@ -1051,18 +1088,31 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             // Find admin UTxOs for fee payment
             var adminUtxos = accountService.findAdaOnlyUtxo(request.adminAddress(), 10_000_000L);
 
+            var inputValue = globalStateUtxo.toValue();
+            var scriptAddr = globalStateSpendAddress.getAddress();
+
             var tx = new Tx()
                     .collectFrom(adminUtxos)
                     .collectFrom(globalStateUtxo, spendRedeemer)
-                    .payToContract(globalStateSpendAddress.getAddress(),
+                    .payToContract(scriptAddr,
                             globalStateUtxo.getAmount(), updatedDatum)
                     .attachSpendingValidator(globalStateSpendScript)
                     .withChangeAddress(request.adminAddress());
+
+            // Register the global state UTxO in the hybrid supplier so the Aiken evaluator
+            // can resolve it with full inline datum data during script cost evaluation
+            hybridUtxoSupplier.add(globalStateUtxo);
 
             var transaction = quickTxBuilder.compose(tx)
                     .withRequiredSigners(HexUtil.decodeHexString(context.getIssuerAdminPkh()))
                     .feePayer(request.adminAddress())
                     .mergeOutputs(false)
+                    .preBalanceTx((txBuilderContext, transaction1) -> {
+                        ensureGlobalStateOutputFirst(transaction1, request.adminAddress());
+                    })
+                    .postBalanceTx((txBuilderContext, transaction1) -> {
+                        restoreGlobalStateOutputValue(transaction1, scriptAddr, inputValue);
+                    })
                     .build();
 
             log.info("Global state update tx: {}", transaction.serializeToHex());
@@ -1073,6 +1123,88 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             return TransactionContext.typedError("error: " + e.getMessage());
         }
     }
+
+    // ========== Read Global State ==========
+
+    /**
+     * Read the current on-chain global state for a KYC token.
+     * Returns parsed datum fields (transfers_paused, mintable_amount, trusted_entities, security_info).
+     */
+    public Optional<GlobalStateData> readGlobalState(String policyId) {
+        try {
+            var kycDataOpt = kycTokenRegistrationRepository.findByProgrammableTokenPolicyId(policyId);
+            if (kycDataOpt.isEmpty()) return Optional.empty();
+
+            var kycData = kycDataOpt.get();
+            var gsInit = kycData.getGlobalStateInit();
+            var globalStateInitTxInput = TransactionInput.builder()
+                    .transactionId(gsInit.getTxHash())
+                    .index(gsInit.getOutputIndex())
+                    .build();
+
+            var globalStateScripts = kycScriptBuilder.buildGlobalStateScripts(
+                    globalStateInitTxInput, kycData.getIssuerAdminPkh());
+            var globalStateMintScript = globalStateScripts.first();
+            var globalStateSpendScript = globalStateScripts.second();
+
+            var globalStateSpendAddress = AddressProvider.getEntAddress(globalStateSpendScript, network.getCardanoNetwork());
+            var globalStatePolicyId = globalStateMintScript.getPolicyId();
+
+            var globalStateUtxo = findGlobalStateUtxo(globalStateSpendAddress.getAddress(), globalStatePolicyId);
+            if (globalStateUtxo == null) return Optional.empty();
+
+            var constr = deserializeGlobalStateDatum(globalStateUtxo);
+            var fields = constr.getData().getPlutusDataList();
+            if (fields.size() < 4) return Optional.empty();
+
+            // Parse transfers_paused (Bool = Constr 0 = False, Constr 1 = True)
+            boolean transfersPaused = false;
+            if (fields.get(0) instanceof ConstrPlutusData boolConstr) {
+                transfersPaused = boolConstr.getAlternative() == 1;
+            }
+
+            // Parse mintable_amount
+            long mintableAmount = 0;
+            if (fields.get(1) instanceof BigIntPlutusData bigInt) {
+                mintableAmount = bigInt.getValue().longValueExact();
+            }
+
+            // Parse trusted_entities
+            var trustedEntities = new java.util.ArrayList<String>();
+            if (fields.get(2) instanceof ListPlutusData list) {
+                for (var item : list.getPlutusDataList()) {
+                    if (item instanceof BytesPlutusData bytes) {
+                        trustedEntities.add(HexUtil.encodeHexString(bytes.getValue()));
+                    }
+                }
+            }
+
+            // Parse security_info
+            String securityInfo = null;
+            if (fields.get(3) instanceof BytesPlutusData bytes) {
+                securityInfo = HexUtil.encodeHexString(bytes.getValue());
+            }
+            // else Constr 0 = unit/void → null
+
+            return Optional.of(new GlobalStateData(
+                    policyId, transfersPaused, mintableAmount, trustedEntities, securityInfo));
+
+        } catch (Exception e) {
+            log.error("Error reading global state for policyId={}", policyId, e);
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Parsed global state data from the on-chain UTxO.
+     */
+    public record GlobalStateData(
+            String policyId,
+            boolean transfersPaused,
+            long mintableAmount,
+            java.util.List<String> trustedEntities,
+            String securityInfo
+    ) {}
 
     // ========== Private Helpers ==========
 
@@ -1089,19 +1221,69 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
     }
 
     /**
+     * Deserialize the inline datum CBOR hex string from a UTxO into a ConstrPlutusData.
+     * Blockfrost returns datum as a CBOR hex string; this must be deserialized before use.
+     */
+    private ConstrPlutusData deserializeGlobalStateDatum(Utxo utxo) {
+        var cborHex = utxo.getInlineDatum();
+        if (cborHex == null || cborHex.isBlank()) {
+            throw new IllegalStateException("Global state UTxO has no inline datum");
+        }
+        try {
+            var data = PlutusData.deserialize(HexUtil.decodeHexString(cborHex));
+            if (data instanceof ConstrPlutusData constr) {
+                return constr;
+            }
+            throw new IllegalStateException("Global state datum is not a ConstrPlutusData: " + data.getClass().getSimpleName());
+        } catch (com.bloxbean.cardano.client.exception.CborDeserializationException e) {
+            throw new IllegalStateException("Failed to deserialize global state datum CBOR", e);
+        }
+    }
+
+    /**
      * Parse the trusted entities list from a global state UTxO datum.
      * Datum format: Constr 0 [Bool, Int, List [ByteArray, ...], Data]
      * (transfers_paused, mintable_amount, trusted_entities, security_info)
      */
-    private ListPlutusData parseTrustedEntitiesFromDatum(Object inlineDatum) {
-        if (inlineDatum instanceof ConstrPlutusData constr) {
-            var fields = constr.getData().getPlutusDataList();
-            // trusted_entities is the 3rd field (index 2)
-            if (fields.size() >= 3 && fields.get(2) instanceof ListPlutusData list) {
-                return list;
-            }
+    private ListPlutusData parseTrustedEntitiesFromDatum(ConstrPlutusData constr) {
+        var fields = constr.getData().getPlutusDataList();
+        // trusted_entities is the 3rd field (index 2)
+        if (fields.size() >= 3 && fields.get(2) instanceof ListPlutusData list) {
+            return list;
         }
         return ListPlutusData.of();
+    }
+
+    /**
+     * Ensure the global state output is at index 0 in the transaction.
+     * The redeemer references global_state_output_index = 0, so if the change
+     * output ended up at index 0 (before the contract output), we swap them.
+     */
+    private void ensureGlobalStateOutputFirst(Transaction transaction, String changeAddress) {
+        var outputs = transaction.getBody().getOutputs();
+        if (!outputs.isEmpty() && outputs.getFirst().getAddress().equals(changeAddress)) {
+            var changeOutput = outputs.removeFirst();
+            outputs.addLast(changeOutput);
+        }
+    }
+
+    /**
+     * Restore the global state output's value to exactly match the input UTxO.
+     * The on-chain validator requires own_input.output.value == global_state_output.value (exact match).
+     * The QuickTxBuilder may adjust lovelace during balancing to meet min-UTxO requirements,
+     * which would cause the validator to reject the tx. This method corrects the value post-balance.
+     */
+    private void restoreGlobalStateOutputValue(Transaction transaction, String scriptAddress, Value inputValue) {
+        var outputs = transaction.getBody().getOutputs();
+        for (var output : outputs) {
+            if (output.getAddress().equals(scriptAddress)) {
+                log.debug("Restoring global state output value: coin={} -> {}",
+                        output.getValue().getCoin(), inputValue.getCoin());
+                output.setValue(inputValue);
+                return;
+            }
+        }
+        log.warn("Could not find global state output at address {} to restore value", scriptAddress);
     }
 
     /**
@@ -1109,50 +1291,32 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
      * Datum format: Constr 0 [Bool, Int, List [ByteArray, ...], Data]
      * Indices: 0=transfers_paused, 1=mintable_amount, 2=trusted_entities, 3=security_info
      */
-    private ConstrPlutusData buildGlobalStateDatumWithField(Object currentDatum, int fieldIndex, PlutusData newValue) {
-        if (currentDatum instanceof ConstrPlutusData constr) {
-            var fields = constr.getData().getPlutusDataList();
-            if (fields.size() >= 4) {
-                var f0 = fieldIndex == 0 ? newValue : fields.get(0);
-                var f1 = fieldIndex == 1 ? newValue : fields.get(1);
-                var f2 = fieldIndex == 2 ? newValue : fields.get(2);
-                var f3 = fieldIndex == 3 ? newValue : fields.get(3);
-                return ConstrPlutusData.of(0, f0, f1, f2, f3);
-            }
+    private ConstrPlutusData buildGlobalStateDatumWithField(ConstrPlutusData currentDatum, int fieldIndex, PlutusData newValue) {
+        var fields = currentDatum.getData().getPlutusDataList();
+        if (fields.size() >= 4) {
+            var f0 = fieldIndex == 0 ? newValue : fields.get(0);
+            var f1 = fieldIndex == 1 ? newValue : fields.get(1);
+            var f2 = fieldIndex == 2 ? newValue : fields.get(2);
+            var f3 = fieldIndex == 3 ? newValue : fields.get(3);
+            return ConstrPlutusData.of(0, f0, f1, f2, f3);
         }
-        // Fallback: fresh datum
-        var defaults = new PlutusData[]{
-                ConstrPlutusData.of(0),               // transfers_paused = False
-                BigIntPlutusData.of(BigInteger.ZERO),  // mintable_amount = 0
-                ListPlutusData.of(),                   // trusted_entities = []
-                ConstrPlutusData.of(0)                 // security_info = unit
-        };
-        defaults[fieldIndex] = newValue;
-        return ConstrPlutusData.of(0, defaults[0], defaults[1], defaults[2], defaults[3]);
+        throw new IllegalStateException("Global state datum has fewer than 4 fields: " + fields.size());
     }
 
     /**
      * Build a new GlobalStateDatum with updated trusted entities, preserving all other fields.
      * Datum format: Constr 0 [Bool, Int, List [ByteArray, ...], Data]
      */
-    private ConstrPlutusData buildGlobalStateDatumWithEntities(Object currentDatum, ListPlutusData newEntities) {
-        if (currentDatum instanceof ConstrPlutusData constr) {
-            var fields = constr.getData().getPlutusDataList();
-            if (fields.size() >= 4) {
-                return ConstrPlutusData.of(0,
-                        fields.get(0),  // transfers_paused
-                        fields.get(1),  // mintable_amount
-                        newEntities,    // updated trusted_entities
-                        fields.get(3)   // security_info
-                );
-            }
+    private ConstrPlutusData buildGlobalStateDatumWithEntities(ConstrPlutusData currentDatum, ListPlutusData newEntities) {
+        var fields = currentDatum.getData().getPlutusDataList();
+        if (fields.size() >= 4) {
+            return ConstrPlutusData.of(0,
+                    fields.get(0),  // transfers_paused
+                    fields.get(1),  // mintable_amount
+                    newEntities,    // updated trusted_entities
+                    fields.get(3)   // security_info
+            );
         }
-        // Fallback: create fresh datum with defaults
-        return ConstrPlutusData.of(0,
-                ConstrPlutusData.of(0),              // transfers_paused = False
-                BigIntPlutusData.of(BigInteger.ZERO), // mintable_amount = 0
-                newEntities,                          // trusted_entities
-                ConstrPlutusData.of(0)                // security_info = unit
-        );
+        throw new IllegalStateException("Global state datum has fewer than 4 fields: " + fields.size());
     }
 }

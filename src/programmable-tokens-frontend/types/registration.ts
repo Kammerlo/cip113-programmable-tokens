@@ -183,7 +183,7 @@ export interface FreezeAndSeizeRegistrationData extends BaseRegistrationData {
 export interface KycRegistrationData extends BaseRegistrationData {
   substandardId: 'kyc';
   adminPubKeyHash: string;
-  telPolicyId: string;
+  globalStatePolicyId: string;
 }
 
 /**

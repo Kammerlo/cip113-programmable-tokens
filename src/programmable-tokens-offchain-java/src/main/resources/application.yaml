@@ -35,6 +35,7 @@ store:
 apiPrefix: /api/v1
 
 keri:
+  enabled: ${KERI_ENABLED:true}
   url: ${KERI_URL:http://localhost:3901}
   booturl: ${KERI_BOOT_URL:http://localhost:3903}
   identifier:

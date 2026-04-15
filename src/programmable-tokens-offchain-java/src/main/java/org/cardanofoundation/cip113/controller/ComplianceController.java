@@ -12,7 +12,7 @@ import org.cardanofoundation.cip113.repository.BlacklistInitRepository;
 import org.cardanofoundation.cip113.repository.FreezeAndSeizeTokenRegistrationRepository;
 import org.cardanofoundation.cip113.repository.KycTokenRegistrationRepository;
 import org.cardanofoundation.cip113.repository.ProgrammableTokenRegistryRepository;
-import org.cardanofoundation.cip113.repository.TelInitRepository;
+import org.cardanofoundation.cip113.repository.GlobalStateInitRepository;
 import org.cardanofoundation.cip113.service.BlacklistQueryService;
 import org.cardanofoundation.cip113.service.ComplianceOperationsService;
 import org.cardanofoundation.cip113.service.substandard.capabilities.BlacklistManageable.AddToBlacklistRequest;
@@ -24,8 +24,10 @@ import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalState
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable.AddToWhitelistRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable.RemoveFromWhitelistRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable.WhitelistInitRequest;
+import org.cardanofoundation.cip113.service.substandard.KycSubstandardHandler;
 import org.cardanofoundation.cip113.service.substandard.context.FreezeAndSeizeContext;
 import org.cardanofoundation.cip113.service.substandard.context.KycContext;
+import org.springframework.context.ApplicationContext;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -51,12 +53,13 @@ public class ComplianceController {
 
     private final ComplianceOperationsService complianceOperationsService;
     private final BlacklistQueryService blacklistQueryService;
+    private final ApplicationContext applicationContext;
 
     private final BlacklistInitRepository blacklistInitRepository;
 
     private final FreezeAndSeizeTokenRegistrationRepository freezeAndSeizeTokenRegistrationRepository;
     private final KycTokenRegistrationRepository kycTokenRegistrationRepository;
-    private final TelInitRepository telInitRepository;
+    private final GlobalStateInitRepository globalStateInitRepository;
 
     private final ProgrammableTokenRegistryRepository programmableTokenRegistryRepository;
 
@@ -370,13 +373,13 @@ public class ComplianceController {
                         throw new RuntimeException("could not find KYC token registration");
                     }
                     var kycData = kycDataOpt.get();
-                    var telInit = kycData.getTelInit();
+                    var gsInit = kycData.getGlobalStateInit();
                     yield KycContext.builder()
                             .issuerAdminPkh(kycData.getIssuerAdminPkh())
-                            .telPolicyId(telInit.getTelNodePolicyId())
-                            .telInitTxInput(TransactionInput.builder()
-                                    .transactionId(telInit.getTxHash())
-                                    .index(telInit.getOutputIndex())
+                            .globalStatePolicyId(gsInit.getGlobalStatePolicyId())
+                            .globalStateInitTxInput(TransactionInput.builder()
+                                    .transactionId(gsInit.getTxHash())
+                                    .index(gsInit.getOutputIndex())
                                     .build())
                             .build();
                 }
@@ -432,13 +435,13 @@ public class ComplianceController {
                         throw new RuntimeException("could not find KYC token registration");
                     }
                     var kycData = kycDataOpt.get();
-                    var telInit = kycData.getTelInit();
+                    var gsInit = kycData.getGlobalStateInit();
                     yield KycContext.builder()
                             .issuerAdminPkh(kycData.getIssuerAdminPkh())
-                            .telPolicyId(telInit.getTelNodePolicyId())
-                            .telInitTxInput(TransactionInput.builder()
-                                    .transactionId(telInit.getTxHash())
-                                    .index(telInit.getOutputIndex())
+                            .globalStatePolicyId(gsInit.getGlobalStatePolicyId())
+                            .globalStateInitTxInput(TransactionInput.builder()
+                                    .transactionId(gsInit.getTxHash())
+                                    .index(gsInit.getOutputIndex())
                                     .build())
                             .build();
                 }
@@ -469,6 +472,34 @@ public class ComplianceController {
     // ========== Global State Endpoints ==========
 
     /**
+     * Read the current on-chain global state for a KYC token.
+     * Returns parsed datum fields: transfers_paused, mintable_amount, trusted_entities, security_info.
+     *
+     * @param policyId The programmable token policy ID
+     * @return Parsed global state data
+     */
+    @GetMapping("/global-state/read")
+    public ResponseEntity<?> readGlobalState(@RequestParam String policyId) {
+
+        log.info("GET /compliance/global-state/read - policyId: {}", policyId);
+
+        try {
+            var handler = applicationContext.getBean(KycSubstandardHandler.class);
+            var result = handler.readGlobalState(policyId);
+
+            if (result.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            return ResponseEntity.ok(result.get());
+
+        } catch (Exception e) {
+            log.error("Error reading global state for policyId={}", policyId, e);
+            return ResponseEntity.internalServerError().body(e.getMessage());
+        }
+    }
+
+    /**
      * Update the global state UTxO for a programmable token.
      * Supports pausing/unpausing transfers, updating mintable amount, and modifying security info.
      *
@@ -495,13 +526,13 @@ public class ComplianceController {
                         throw new RuntimeException("could not find KYC token registration");
                     }
                     var kycData = kycDataOpt.get();
-                    var telInit = kycData.getTelInit();
+                    var gsInit = kycData.getGlobalStateInit();
                     yield KycContext.builder()
                             .issuerAdminPkh(kycData.getIssuerAdminPkh())
-                            .telPolicyId(telInit.getTelNodePolicyId())
-                            .telInitTxInput(TransactionInput.builder()
-                                    .transactionId(telInit.getTxHash())
-                                    .index(telInit.getOutputIndex())
+                            .globalStatePolicyId(gsInit.getGlobalStatePolicyId())
+                            .globalStateInitTxInput(TransactionInput.builder()
+                                    .transactionId(gsInit.getTxHash())
+                                    .index(gsInit.getOutputIndex())
                                     .build())
                             .build();
                 }

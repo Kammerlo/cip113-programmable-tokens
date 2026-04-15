@@ -26,13 +26,16 @@ public interface GlobalStateManageable {
             /** New value for mintable_amount (for UPDATE_MINTABLE_AMOUNT) */
             Long mintableAmount,
             /** New security info as hex-encoded bytes (for MODIFY_SECURITY_INFO) */
-            String securityInfo
+            String securityInfo,
+            /** Full replacement list of trusted entity vkeys (for MODIFY_TRUSTED_ENTITIES) */
+            java.util.List<String> trustedEntities
     ) {}
 
     enum GlobalStateAction {
         PAUSE_TRANSFERS,
         UPDATE_MINTABLE_AMOUNT,
-        MODIFY_SECURITY_INFO
+        MODIFY_SECURITY_INFO,
+        MODIFY_TRUSTED_ENTITIES
     }
 
     /**

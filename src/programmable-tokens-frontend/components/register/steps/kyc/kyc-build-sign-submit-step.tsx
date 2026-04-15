@@ -26,7 +26,7 @@ type BuildStatus =
 interface KycBuildResult {
   tokenPolicyId: string;
   regTxHash: string;
-  telPolicyId: string;
+  globalStatePolicyId: string;
 }
 
 export function KycBuildSignSubmitStep({
@@ -57,9 +57,9 @@ export function KycBuildSignSubmitStep({
     return (detailsState?.data || {}) as Partial<TokenDetailsData>;
   }, [wizardState.stepStates]);
 
-  const telPolicyId = useMemo(() => {
+  const globalStatePolicyId = useMemo(() => {
     const kycState = wizardState.stepStates['kyc-config'];
-    return (kycState?.data as { telPolicyId?: string })?.telPolicyId || '';
+    return (kycState?.data as { globalStatePolicyId?: string })?.globalStatePolicyId || '';
   }, [wizardState.stepStates]);
 
   // ---- BUILD ----
@@ -72,8 +72,8 @@ export function KycBuildSignSubmitStep({
       onError('Token details missing');
       return;
     }
-    if (!telPolicyId) {
-      onError('TEL Policy ID is required');
+    if (!globalStatePolicyId) {
+      onError('Global State Policy ID is required');
       return;
     }
 
@@ -100,7 +100,7 @@ export function KycBuildSignSubmitStep({
         quantity: tokenDetails.quantity,
         recipientAddress: tokenDetails.recipientAddress || '',
         adminPubKeyHash,
-        telPolicyId,
+        globalStatePolicyId,
       };
 
       const regResponse = await registerToken(regRequest, selectedVersion?.txHash);
@@ -127,7 +127,7 @@ export function KycBuildSignSubmitStep({
     } finally {
       setProcessing(false);
     }
-  }, [connected, wallet, tokenDetails, telPolicyId, selectedVersion, onError, setProcessing]);
+  }, [connected, wallet, tokenDetails, globalStatePolicyId, selectedVersion, onError, setProcessing]);
 
   // ---- SIGN & SUBMIT ----
   const handleSignAndSubmit = useCallback(async () => {
@@ -171,7 +171,7 @@ export function KycBuildSignSubmitStep({
         data: {
           tokenPolicyId,
           regTxHash: hash,
-          telPolicyId,
+          globalStatePolicyId,
         },
         txHash: hash,
         completedAt: Date.now(),
@@ -199,7 +199,7 @@ export function KycBuildSignSubmitStep({
     } finally {
       setProcessing(false);
     }
-  }, [connected, wallet, unsignedCbor, tokenPolicyId, telPolicyId, onComplete, onError, setProcessing]);
+  }, [connected, wallet, unsignedCbor, tokenPolicyId, globalStatePolicyId, onComplete, onError, setProcessing]);
 
   const handleFullRetry = useCallback(() => {
     setStatus('idle');
@@ -274,8 +274,8 @@ export function KycBuildSignSubmitStep({
                 <p className="text-white font-medium">KYC</p>
               </div>
               <div className="col-span-2">
-                <span className="text-dark-400">TEL Policy ID</span>
-                <p className="text-white font-medium text-sm font-mono break-all">{telPolicyId}</p>
+                <span className="text-dark-400">Global State Policy ID</span>
+                <p className="text-white font-medium text-sm font-mono break-all">{globalStatePolicyId}</p>
               </div>
               {tokenDetails.recipientAddress && (
                 <div className="col-span-2">
@@ -297,7 +297,7 @@ export function KycBuildSignSubmitStep({
                 <p className="text-blue-300 font-medium text-sm">KYC Token Registration</p>
                 <p className="text-blue-200/70 text-sm mt-1">
                   This will register a programmable token that requires KYC attestation for transfers.
-                  Transfers must include a valid signature from a trusted entity in the TEL.
+                  Transfers must include a valid signature from a trusted entity in the Global State.
                 </p>
               </div>
             </div>
@@ -344,10 +344,10 @@ export function KycBuildSignSubmitStep({
 
           <Card className="p-4 space-y-2">
             <div className="flex items-center justify-between">
-              <h4 className="font-medium text-white">TEL Policy ID</h4>
-              <CopyButton value={telPolicyId} />
+              <h4 className="font-medium text-white">Global State Policy ID</h4>
+              <CopyButton value={globalStatePolicyId} />
             </div>
-            <p className="text-sm text-cyan-400 font-mono break-all">{telPolicyId}</p>
+            <p className="text-sm text-cyan-400 font-mono break-all">{globalStatePolicyId}</p>
           </Card>
 
           {derivedTxHash && (
@@ -386,10 +386,10 @@ export function KycBuildSignSubmitStep({
             </div>
             <div className="p-3 bg-dark-800 rounded">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-dark-400">TEL Policy ID</span>
-                <CopyButton value={telPolicyId} />
+                <span className="text-xs text-dark-400">Global State Policy ID</span>
+                <CopyButton value={globalStatePolicyId} />
               </div>
-              <p className="text-sm text-cyan-400 font-mono break-all">{telPolicyId}</p>
+              <p className="text-sm text-cyan-400 font-mono break-all">{globalStatePolicyId}</p>
             </div>
             {regTxHash && (
               <div className="p-3 bg-dark-800 rounded">

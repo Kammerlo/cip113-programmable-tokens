@@ -20,11 +20,13 @@ import org.cardanofoundation.signify.app.coring.Operation;
 import org.cardanofoundation.signify.cesr.Salter;
 import org.cardanofoundation.signify.core.States;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+@ConditionalOnProperty(name = "keri.enabled", havingValue = "true")
 @EnableConfigurationProperties(SchemaConfig.class)
 @Slf4j
 public class KeriConfig {

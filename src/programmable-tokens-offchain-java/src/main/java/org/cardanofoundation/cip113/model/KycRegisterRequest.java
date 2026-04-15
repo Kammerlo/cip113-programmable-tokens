@@ -8,7 +8,7 @@ import lombok.experimental.SuperBuilder;
 
 /**
  * Registration request for the "kyc" substandard.
- * Includes the Trusted Entity List (TEL) policy ID that will be used
+ * Includes the global state policy ID that will be used
  * to verify KYC attestations during token transfers.
  */
 @Data
@@ -25,8 +25,8 @@ public class KycRegisterRequest extends RegisterTokenRequest {
     private String adminPubKeyHash;
 
     /**
-     * Policy ID of the Trusted Entity List (TEL) linked list node NFTs.
-     * The transfer validator will check KYC attestations against entities in this list.
+     * Policy ID of the global state NFT.
+     * The transfer validator will check KYC attestations against entities in the global state.
      */
-    private String telPolicyId;
+    private String globalStatePolicyId;
 }

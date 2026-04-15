@@ -3,7 +3,7 @@
  * Handles blacklist management and token seizure operations
  */
 
-import { apiPost } from './client';
+import { apiGet, apiPost } from './client';
 import type {
   BlacklistInitRequest,
   BlacklistInitResponse,
@@ -17,6 +17,7 @@ import type {
   WhitelistOperationResponse,
   GlobalStateUpdateRequest,
   GlobalStateUpdateResponse,
+  GlobalStateData,
 } from '@/types/compliance';
 
 // Re-export types
@@ -33,6 +34,7 @@ export type {
   WhitelistOperationResponse,
   GlobalStateUpdateRequest,
   GlobalStateUpdateResponse,
+  GlobalStateData,
 };
 
 /**
@@ -168,6 +170,16 @@ export async function removeFromWhitelist(
     endpoint,
     request,
     { timeout: 60000 }
+  );
+}
+
+/**
+ * Read the current on-chain global state for a KYC token.
+ */
+export async function readGlobalState(policyId: string): Promise<GlobalStateData> {
+  return apiGet<GlobalStateData>(
+    `/compliance/global-state/read?policyId=${encodeURIComponent(policyId)}`,
+    { timeout: 30000 }
   );
 }
 

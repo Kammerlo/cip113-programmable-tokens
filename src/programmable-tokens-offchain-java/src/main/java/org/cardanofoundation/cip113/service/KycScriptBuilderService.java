@@ -25,7 +25,7 @@ import java.math.BigInteger;
  * This service centralizes script parameterization logic for all KYC contracts:
  * <ul>
  *   <li><b>Issue Contract</b> - Parameterized with admin credential</li>
- *   <li><b>Transfer Contract</b> - Parameterized with prog logic base + TEL policy ID</li>
+ *   <li><b>Transfer Contract</b> - Parameterized with prog logic base + global state policy ID</li>
  * </ul>
  */
 @Service
@@ -44,18 +44,18 @@ public class KycScriptBuilderService {
      * Build Issue Contract (withdraw)
      * <p>
      * Contract: kyc_transfer.issue.withdraw
-     * Parameters: [_tel_policy_id, permitted_cred]
-     * The tel_policy_id is a phantom parameter that makes each token's issue script unique.
+     * Parameters: [_global_state_policy_id, permitted_cred]
+     * The global_state_policy_id is a phantom parameter that makes each token's issue script unique.
      *
-     * @param telPolicyId     TEL (global state) policy ID — makes the script hash unique per token
+     * @param globalStatePolicyId     Global state policy ID — makes the script hash unique per token
      * @param adminCredential Admin's credential (key or script)
      * @return Parameterized PlutusScript v3
      */
-    public PlutusScript buildIssueScript(String telPolicyId, Credential adminCredential) {
+    public PlutusScript buildIssueScript(String globalStatePolicyId, Credential adminCredential) {
         var contract = getContract("kyc_transfer.issue.withdraw");
 
         var params = ListPlutusData.of(
-                BytesPlutusData.of(HexUtil.decodeHexString(telPolicyId)),
+                BytesPlutusData.of(HexUtil.decodeHexString(globalStatePolicyId)),
                 PlutusSerializationHelper.serialize(adminCredential)
         );
 
@@ -66,15 +66,15 @@ public class KycScriptBuilderService {
      * Build Transfer Contract (withdraw)
      * <p>
      * Contract: kyc_transfer.transfer.withdraw
-     * Parameters: [programmable_logic_base_cred, tel_policy_id]
+     * Parameters: [programmable_logic_base_cred, global_state_policy_id]
      *
      * @param progLogicBaseScriptHash Protocol's programmable logic base script hash
-     * @param telPolicyId             Trusted Entity List policy ID
+     * @param globalStatePolicyId     Global state policy ID
      * @return Parameterized PlutusScript v3
      */
     public PlutusScript buildTransferScript(
             String progLogicBaseScriptHash,
-            String telPolicyId) {
+            String globalStatePolicyId) {
 
         var contract = getContract("kyc_transfer.transfer.withdraw");
 
@@ -82,7 +82,7 @@ public class KycScriptBuilderService {
 
         var params = ListPlutusData.of(
                 PlutusSerializationHelper.serialize(progLogicCredential),
-                BytesPlutusData.of(HexUtil.decodeHexString(telPolicyId))
+                BytesPlutusData.of(HexUtil.decodeHexString(globalStatePolicyId))
         );
 
         return applyParameters(contract, params, "kyc_transfer");
