@@ -45,8 +45,15 @@ export interface FreezeAndSeizeRegisterRequest extends BaseRegisterTokenRequest 
   blacklistNodePolicyId: string;   // From blacklist initialization step
 }
 
+/** KYC substandard - requires TEL policy ID */
+export interface KycRegisterRequest extends BaseRegisterTokenRequest {
+  substandardId: 'kyc';
+  adminPubKeyHash: string;         // Payment key hash derived from feePayerAddress
+  telPolicyId: string;             // Trusted Entity List policy ID
+}
+
 /** Discriminated union of all registration request types */
-export type RegisterTokenRequest = DummyRegisterRequest | FreezeAndSeizeRegisterRequest;
+export type RegisterTokenRequest = DummyRegisterRequest | FreezeAndSeizeRegisterRequest | KycRegisterRequest;
 
 export interface RegisterTokenResponse {
   policyId: string;              // Generated policy ID
@@ -137,6 +144,9 @@ export interface TransferTokenRequest {
   unit: string;               // Full unit (policyId + assetName hex)
   quantity: string;           // Amount to transfer
   recipientAddress: string;   // Recipient's address
+  // KYC fields (optional, used by KYC substandard)
+  kycPayload?: string;        // Hex-encoded 37-byte KYC payload: user_pkh(28) || role(1) || valid_until(8)
+  kycSignature?: string;      // Hex-encoded 64-byte Ed25519 signature over kycPayload
 }
 
 // Backend returns plain text CBOR hex string (not JSON)

@@ -10,7 +10,9 @@ import org.cardanofoundation.cip113.entity.ProgrammableTokenRegistryEntity;
 import org.cardanofoundation.cip113.model.BlacklistInitResponse;
 import org.cardanofoundation.cip113.repository.BlacklistInitRepository;
 import org.cardanofoundation.cip113.repository.FreezeAndSeizeTokenRegistrationRepository;
+import org.cardanofoundation.cip113.repository.KycTokenRegistrationRepository;
 import org.cardanofoundation.cip113.repository.ProgrammableTokenRegistryRepository;
+import org.cardanofoundation.cip113.repository.TelInitRepository;
 import org.cardanofoundation.cip113.service.BlacklistQueryService;
 import org.cardanofoundation.cip113.service.ComplianceOperationsService;
 import org.cardanofoundation.cip113.service.substandard.capabilities.BlacklistManageable.AddToBlacklistRequest;
@@ -18,10 +20,12 @@ import org.cardanofoundation.cip113.service.substandard.capabilities.BlacklistMa
 import org.cardanofoundation.cip113.service.substandard.capabilities.BlacklistManageable.RemoveFromBlacklistRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.Seizeable.MultiSeizeRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.Seizeable.SeizeRequest;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateUpdateRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable.AddToWhitelistRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable.RemoveFromWhitelistRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable.WhitelistInitRequest;
 import org.cardanofoundation.cip113.service.substandard.context.FreezeAndSeizeContext;
+import org.cardanofoundation.cip113.service.substandard.context.KycContext;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -51,6 +55,8 @@ public class ComplianceController {
     private final BlacklistInitRepository blacklistInitRepository;
 
     private final FreezeAndSeizeTokenRegistrationRepository freezeAndSeizeTokenRegistrationRepository;
+    private final KycTokenRegistrationRepository kycTokenRegistrationRepository;
+    private final TelInitRepository telInitRepository;
 
     private final ProgrammableTokenRegistryRepository programmableTokenRegistryRepository;
 
@@ -305,11 +311,18 @@ public class ComplianceController {
                 request.tokenPolicyId(), request.adminAddress());
 
         try {
-            // Resolve substandard from policyId via unified registry
-            var substandardId = resolveSubstandardId(request.tokenPolicyId());
+            // Resolve substandard: prefer explicit substandardId, fall back to resolving from policyId
+            var substandardId = request.substandardId() != null && !request.substandardId().isBlank()
+                    ? request.substandardId()
+                    : resolveSubstandardId(request.tokenPolicyId());
+
+            var context = switch (substandardId) {
+                case "kyc" -> KycContext.emptyContext();
+                default -> null;
+            };
 
             var txContext = complianceOperationsService.initWhitelist(
-                    substandardId, request, protocolTxHash, null);
+                    substandardId, request, protocolTxHash, context);
 
             if (txContext.isSuccessful()) {
                 return ResponseEntity.ok(txContext);
@@ -349,8 +362,29 @@ public class ComplianceController {
             // Resolve substandard from policyId via unified registry
             var substandardId = resolveSubstandardId(request.policyId());
 
+            var context = switch (substandardId) {
+                case "kyc" -> {
+                    var kycDataOpt = kycTokenRegistrationRepository
+                            .findByProgrammableTokenPolicyId(request.policyId());
+                    if (kycDataOpt.isEmpty()) {
+                        throw new RuntimeException("could not find KYC token registration");
+                    }
+                    var kycData = kycDataOpt.get();
+                    var telInit = kycData.getTelInit();
+                    yield KycContext.builder()
+                            .issuerAdminPkh(kycData.getIssuerAdminPkh())
+                            .telPolicyId(telInit.getTelNodePolicyId())
+                            .telInitTxInput(TransactionInput.builder()
+                                    .transactionId(telInit.getTxHash())
+                                    .index(telInit.getOutputIndex())
+                                    .build())
+                            .build();
+                }
+                default -> null;
+            };
+
             var txContext = complianceOperationsService.addToWhitelist(
-                    substandardId, request, protocolTxHash, null);
+                    substandardId, request, protocolTxHash, context);
 
             if (txContext.isSuccessful()) {
                 return ResponseEntity.ok(txContext);
@@ -390,8 +424,29 @@ public class ComplianceController {
             // Resolve substandard from policyId via unified registry
             var substandardId = resolveSubstandardId(request.policyId());
 
+            var context = switch (substandardId) {
+                case "kyc" -> {
+                    var kycDataOpt = kycTokenRegistrationRepository
+                            .findByProgrammableTokenPolicyId(request.policyId());
+                    if (kycDataOpt.isEmpty()) {
+                        throw new RuntimeException("could not find KYC token registration");
+                    }
+                    var kycData = kycDataOpt.get();
+                    var telInit = kycData.getTelInit();
+                    yield KycContext.builder()
+                            .issuerAdminPkh(kycData.getIssuerAdminPkh())
+                            .telPolicyId(telInit.getTelNodePolicyId())
+                            .telInitTxInput(TransactionInput.builder()
+                                    .transactionId(telInit.getTxHash())
+                                    .index(telInit.getOutputIndex())
+                                    .build())
+                            .build();
+                }
+                default -> null;
+            };
+
             var txContext = complianceOperationsService.removeFromWhitelist(
-                    substandardId, request, protocolTxHash, null);
+                    substandardId, request, protocolTxHash, context);
 
             if (txContext.isSuccessful()) {
                 return ResponseEntity.ok(txContext);
@@ -407,6 +462,69 @@ public class ComplianceController {
             return ResponseEntity.badRequest().body(e.getMessage());
         } catch (Exception e) {
             log.error("Error removing from whitelist", e);
+            return ResponseEntity.internalServerError().body(e.getMessage());
+        }
+    }
+
+    // ========== Global State Endpoints ==========
+
+    /**
+     * Update the global state UTxO for a programmable token.
+     * Supports pausing/unpausing transfers, updating mintable amount, and modifying security info.
+     *
+     * @param request        The global state update request (action + value)
+     * @param protocolTxHash Optional protocol version tx hash
+     * @return Unsigned CBOR transaction hex
+     */
+    @PostMapping("/global-state/update")
+    public ResponseEntity<?> updateGlobalState(
+            @RequestBody GlobalStateUpdateRequest request,
+            @RequestParam(required = false) String protocolTxHash) {
+
+        log.info("POST /compliance/global-state/update - policyId: {}, action: {}",
+                request.policyId(), request.action());
+
+        try {
+            var substandardId = resolveSubstandardId(request.policyId());
+
+            var context = switch (substandardId) {
+                case "kyc" -> {
+                    var kycDataOpt = kycTokenRegistrationRepository
+                            .findByProgrammableTokenPolicyId(request.policyId());
+                    if (kycDataOpt.isEmpty()) {
+                        throw new RuntimeException("could not find KYC token registration");
+                    }
+                    var kycData = kycDataOpt.get();
+                    var telInit = kycData.getTelInit();
+                    yield KycContext.builder()
+                            .issuerAdminPkh(kycData.getIssuerAdminPkh())
+                            .telPolicyId(telInit.getTelNodePolicyId())
+                            .telInitTxInput(TransactionInput.builder()
+                                    .transactionId(telInit.getTxHash())
+                                    .index(telInit.getOutputIndex())
+                                    .build())
+                            .build();
+                }
+                default -> null;
+            };
+
+            var txContext = complianceOperationsService.updateGlobalState(
+                    substandardId, request, protocolTxHash, context);
+
+            if (txContext.isSuccessful()) {
+                return ResponseEntity.ok(txContext);
+            } else {
+                return ResponseEntity.badRequest().body(txContext.error());
+            }
+
+        } catch (UnsupportedOperationException e) {
+            log.warn("Capability not supported: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid request: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            log.error("Error updating global state", e);
             return ResponseEntity.internalServerError().body(e.getMessage());
         }
     }

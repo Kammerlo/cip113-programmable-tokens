@@ -8,6 +8,8 @@ import org.cardanofoundation.cip113.model.bootstrap.ProtocolBootstrapParams;
 import org.cardanofoundation.cip113.service.substandard.SubstandardHandlerFactory;
 import org.cardanofoundation.cip113.service.substandard.capabilities.BlacklistManageable;
 import org.cardanofoundation.cip113.service.substandard.capabilities.BlacklistManageable.*;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.*;
 import org.cardanofoundation.cip113.service.substandard.capabilities.Seizeable;
 import org.cardanofoundation.cip113.service.substandard.capabilities.Seizeable.*;
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable;
@@ -201,6 +203,35 @@ public class ComplianceOperationsService {
         return txContext;
     }
 
+    // ========== Global State Operations ==========
+
+    /**
+     * Update the global state UTxO (pause transfers, mintable amount, security info).
+     *
+     * @param substandardId  The substandard identifier
+     * @param request        The global state update request
+     * @param protocolTxHash Optional protocol version tx hash
+     * @param context        Optional context for context-aware handlers
+     * @return Transaction context with unsigned CBOR tx
+     */
+    public TransactionContext<Void> updateGlobalState(
+            String substandardId,
+            GlobalStateUpdateRequest request,
+            String protocolTxHash,
+            SubstandardContext context) {
+
+        log.info("Updating global state for substandard: {}, action: {}",
+                substandardId, request.action());
+
+        var protocolParams = resolveProtocolParams(protocolTxHash);
+        var globalStateMgr = getGlobalStateManageable(substandardId, context);
+
+        var txContext = globalStateMgr.buildGlobalStateUpdateTransaction(request, protocolParams);
+
+        log.info("Global state update transaction built successfully for substandard: {}", substandardId);
+        return txContext;
+    }
+
     // ========== Seize Operations ==========
 
     /**
@@ -303,6 +334,23 @@ public class ComplianceOperationsService {
         return handler.asWhitelistManageable()
                 .orElseThrow(() -> new UnsupportedOperationException(
                         "Substandard '" + substandardId + "' does not support whitelist management"));
+    }
+
+    /**
+     * Get GlobalStateManageable capability from handler.
+     */
+    private GlobalStateManageable getGlobalStateManageable(String substandardId, SubstandardContext context) {
+        var handler = context != null
+                ? handlerFactory.getHandler(substandardId, context)
+                : handlerFactory.getHandler(substandardId);
+
+        if (handler == null) {
+            throw new IllegalArgumentException("Unknown substandard: " + substandardId);
+        }
+
+        return handler.asGlobalStateManageable()
+                .orElseThrow(() -> new UnsupportedOperationException(
+                        "Substandard '" + substandardId + "' does not support global state management"));
     }
 
     /**

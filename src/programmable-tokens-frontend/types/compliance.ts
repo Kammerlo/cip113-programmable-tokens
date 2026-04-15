@@ -59,6 +59,57 @@ export interface SeizeTokensRequest {
 export type SeizeTokensResponse = TransactionContextResponse<void>;
 
 // ============================================================================
+// Whitelist (TEL) Management
+// ============================================================================
+
+export interface WhitelistInitRequest {
+  tokenPolicyId?: string;        // Policy ID of the programmable token (optional if substandardId provided)
+  substandardId?: string;        // Substandard ID (e.g., "kyc") - for pre-registration init
+  adminAddress: string;          // Admin address that will manage this whitelist
+  bootstrapTxHash: string;       // Bootstrap UTxO transaction hash
+  bootstrapOutputIndex: number;  // Bootstrap UTxO output index
+  initialVkeys?: string[];        // Optional initial trusted entity vkeys (64 hex chars each)
+  initialTransfersPaused?: boolean;  // Optional: start with transfers paused (default: false)
+  initialMintableAmount?: number;    // Optional: initial mintable amount (default: 0)
+  initialSecurityInfo?: string;      // Optional: security info as hex bytes
+}
+
+export type WhitelistInitResponse = TransactionContextResponse<{ bootstrapParameters: string }>;
+
+export interface AddToWhitelistRequest {
+  adminAddress: string;          // Admin address performing the action
+  targetCredential: string;      // Verification key hex (64 chars)
+  policyId: string;              // Policy ID of the programmable token
+  kycReference?: string;         // Optional KYC verification reference
+}
+
+export interface RemoveFromWhitelistRequest {
+  adminAddress: string;          // Admin address performing the action
+  targetCredential: string;      // Verification key hex (64 chars)
+  policyId: string;              // Policy ID of the programmable token
+  reason?: string;               // Optional reason for removal
+}
+
+export type WhitelistOperationResponse = TransactionContextResponse<void>;
+
+// ============================================================================
+// Global State Management
+// ============================================================================
+
+export type GlobalStateAction = 'PAUSE_TRANSFERS' | 'UPDATE_MINTABLE_AMOUNT' | 'MODIFY_SECURITY_INFO';
+
+export interface GlobalStateUpdateRequest {
+  adminAddress: string;
+  policyId: string;
+  action: GlobalStateAction;
+  transfersPaused?: boolean;       // for PAUSE_TRANSFERS
+  mintableAmount?: number;         // for UPDATE_MINTABLE_AMOUNT
+  securityInfo?: string;           // for MODIFY_SECURITY_INFO (hex bytes)
+}
+
+export type GlobalStateUpdateResponse = TransactionContextResponse<void>;
+
+// ============================================================================
 // Shared Types
 // ============================================================================
 

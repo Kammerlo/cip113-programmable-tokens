@@ -12,6 +12,11 @@ import type {
   BlacklistOperationResponse,
   SeizeTokensRequest,
   SeizeTokensResponse,
+  AddToWhitelistRequest,
+  RemoveFromWhitelistRequest,
+  WhitelistOperationResponse,
+  GlobalStateUpdateRequest,
+  GlobalStateUpdateResponse,
 } from '@/types/compliance';
 
 // Re-export types
@@ -23,6 +28,11 @@ export type {
   BlacklistOperationResponse,
   SeizeTokensRequest,
   SeizeTokensResponse,
+  AddToWhitelistRequest,
+  RemoveFromWhitelistRequest,
+  WhitelistOperationResponse,
+  GlobalStateUpdateRequest,
+  GlobalStateUpdateResponse,
 };
 
 /**
@@ -125,6 +135,60 @@ export async function seizeTokens(
  * @param protocolTxHash - Optional protocol version transaction hash
  * @returns Promise<boolean> - Whether the address is blacklisted
  */
+/**
+ * Add a verification key to the trusted entity list (whitelist)
+ */
+export async function addToWhitelist(
+  request: AddToWhitelistRequest,
+  protocolTxHash?: string
+): Promise<WhitelistOperationResponse> {
+  const endpoint = protocolTxHash
+    ? `/compliance/whitelist/add?protocolTxHash=${protocolTxHash}`
+    : '/compliance/whitelist/add';
+
+  return apiPost<AddToWhitelistRequest, WhitelistOperationResponse>(
+    endpoint,
+    request,
+    { timeout: 60000 }
+  );
+}
+
+/**
+ * Remove a verification key from the trusted entity list (whitelist)
+ */
+export async function removeFromWhitelist(
+  request: RemoveFromWhitelistRequest,
+  protocolTxHash?: string
+): Promise<WhitelistOperationResponse> {
+  const endpoint = protocolTxHash
+    ? `/compliance/whitelist/remove?protocolTxHash=${protocolTxHash}`
+    : '/compliance/whitelist/remove';
+
+  return apiPost<RemoveFromWhitelistRequest, WhitelistOperationResponse>(
+    endpoint,
+    request,
+    { timeout: 60000 }
+  );
+}
+
+/**
+ * Update the global state UTxO (pause transfers, mintable amount, security info)
+ */
+export async function updateGlobalState(
+  request: GlobalStateUpdateRequest,
+  protocolTxHash?: string
+): Promise<GlobalStateUpdateResponse> {
+  const endpoint = protocolTxHash
+    ? `/compliance/global-state/update?protocolTxHash=${protocolTxHash}`
+    : '/compliance/global-state/update';
+
+  return apiPost<GlobalStateUpdateRequest, GlobalStateUpdateResponse>(
+    endpoint,
+    request,
+    { timeout: 60000 }
+  );
+}
+
 export async function isAddressBlacklisted(
   tokenPolicyId: string,
   address: string,
