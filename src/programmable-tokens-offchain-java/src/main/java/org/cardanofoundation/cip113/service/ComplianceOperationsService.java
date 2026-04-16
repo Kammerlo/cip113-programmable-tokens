@@ -9,7 +9,11 @@ import org.cardanofoundation.cip113.service.substandard.SubstandardHandlerFactor
 import org.cardanofoundation.cip113.service.substandard.capabilities.BlacklistManageable;
 import org.cardanofoundation.cip113.service.substandard.capabilities.BlacklistManageable.*;
 import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable;
-import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.*;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.AddTrustedEntityRequest;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateInitRequest;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateInitResult;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateUpdateRequest;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.RemoveTrustedEntityRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.Seizeable;
 import org.cardanofoundation.cip113.service.substandard.capabilities.Seizeable.*;
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable;
@@ -204,6 +208,87 @@ public class ComplianceOperationsService {
     }
 
     // ========== Global State Operations ==========
+
+    /**
+     * Initialize the global state UTxO for a new token deployment.
+     *
+     * @param substandardId  The substandard identifier (e.g., "kyc")
+     * @param request        The initialization request
+     * @param protocolTxHash Optional protocol version tx hash
+     * @param context        Optional context for context-aware handlers
+     * @return Transaction context with unsigned CBOR tx and global-state policy ID
+     */
+    public TransactionContext<GlobalStateInitResult> initGlobalState(
+            String substandardId,
+            GlobalStateInitRequest request,
+            String protocolTxHash,
+            SubstandardContext context) {
+
+        log.info("Initializing global state for substandard: {}, admin: {}",
+                substandardId, request.adminAddress());
+
+        var protocolParams = resolveProtocolParams(protocolTxHash);
+        var globalStateMgr = getGlobalStateManageable(substandardId, context);
+
+        var txContext = globalStateMgr.buildGlobalStateInitTransaction(request, protocolParams);
+
+        log.info("Global state init transaction built successfully for substandard: {}", substandardId);
+        return txContext;
+    }
+
+    /**
+     * Add a trusted entity (verification key) to the global state.
+     *
+     * @param substandardId  The substandard identifier
+     * @param request        The add-entity request
+     * @param protocolTxHash Optional protocol version tx hash
+     * @param context        Optional context for context-aware handlers
+     * @return Transaction context with unsigned CBOR tx
+     */
+    public TransactionContext<Void> addTrustedEntity(
+            String substandardId,
+            AddTrustedEntityRequest request,
+            String protocolTxHash,
+            SubstandardContext context) {
+
+        log.info("Adding trusted entity for substandard: {}, target: {}",
+                substandardId, request.verificationKey());
+
+        var protocolParams = resolveProtocolParams(protocolTxHash);
+        var globalStateMgr = getGlobalStateManageable(substandardId, context);
+
+        var txContext = globalStateMgr.buildAddTrustedEntityTransaction(request, protocolParams);
+
+        log.info("Add trusted entity transaction built successfully for substandard: {}", substandardId);
+        return txContext;
+    }
+
+    /**
+     * Remove a trusted entity (verification key) from the global state.
+     *
+     * @param substandardId  The substandard identifier
+     * @param request        The remove-entity request
+     * @param protocolTxHash Optional protocol version tx hash
+     * @param context        Optional context for context-aware handlers
+     * @return Transaction context with unsigned CBOR tx
+     */
+    public TransactionContext<Void> removeTrustedEntity(
+            String substandardId,
+            RemoveTrustedEntityRequest request,
+            String protocolTxHash,
+            SubstandardContext context) {
+
+        log.info("Removing trusted entity for substandard: {}, target: {}",
+                substandardId, request.verificationKey());
+
+        var protocolParams = resolveProtocolParams(protocolTxHash);
+        var globalStateMgr = getGlobalStateManageable(substandardId, context);
+
+        var txContext = globalStateMgr.buildRemoveTrustedEntityTransaction(request, protocolParams);
+
+        log.info("Remove trusted entity transaction built successfully for substandard: {}", substandardId);
+        return txContext;
+    }
 
     /**
      * Update the global state UTxO (pause transfers, mintable amount, security info).

@@ -93,6 +93,37 @@ export interface RemoveFromWhitelistRequest {
 export type WhitelistOperationResponse = TransactionContextResponse<void>;
 
 // ============================================================================
+// Global State Init / Entity Management (KYC substandard)
+// Separate from Whitelist — mirrors GlobalStateManageable on the backend.
+// ============================================================================
+
+export interface GlobalStateInitRequest {
+  substandardId: string;              // e.g. "kyc"
+  adminAddress: string;               // admin that owns the global state
+  initialVkeys?: string[];            // initial trusted entity vkeys (64 hex chars each)
+  initialTransfersPaused?: boolean;   // start with transfers paused (default: false)
+  initialMintableAmount?: number;     // initial mintable amount cap (default: 0)
+  initialSecurityInfo?: string;       // optional hex-encoded compliance metadata
+}
+
+export type GlobalStateInitResponse = TransactionContextResponse<{ globalStatePolicyId: string }>;
+
+export interface AddTrustedEntityRequest {
+  adminAddress: string;     // admin performing the action
+  verificationKey: string;  // Ed25519 vkey hex (64 chars / 32 bytes)
+  policyId: string;         // programmable token policy ID
+}
+
+export interface RemoveTrustedEntityRequest {
+  adminAddress: string;     // admin performing the action
+  verificationKey: string;  // Ed25519 vkey hex (64 chars / 32 bytes) to remove
+  policyId: string;         // programmable token policy ID
+  reason?: string;          // optional reason for removal
+}
+
+export type TrustedEntityOperationResponse = TransactionContextResponse<void>;
+
+// ============================================================================
 // Global State Management
 // ============================================================================
 

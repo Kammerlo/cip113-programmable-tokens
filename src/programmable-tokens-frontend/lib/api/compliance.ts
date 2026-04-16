@@ -15,6 +15,11 @@ import type {
   AddToWhitelistRequest,
   RemoveFromWhitelistRequest,
   WhitelistOperationResponse,
+  GlobalStateInitRequest,
+  GlobalStateInitResponse,
+  AddTrustedEntityRequest,
+  RemoveTrustedEntityRequest,
+  TrustedEntityOperationResponse,
   GlobalStateUpdateRequest,
   GlobalStateUpdateResponse,
   GlobalStateData,
@@ -32,6 +37,11 @@ export type {
   AddToWhitelistRequest,
   RemoveFromWhitelistRequest,
   WhitelistOperationResponse,
+  GlobalStateInitRequest,
+  GlobalStateInitResponse,
+  AddTrustedEntityRequest,
+  RemoveTrustedEntityRequest,
+  TrustedEntityOperationResponse,
   GlobalStateUpdateRequest,
   GlobalStateUpdateResponse,
   GlobalStateData,
@@ -167,6 +177,63 @@ export async function removeFromWhitelist(
     : '/compliance/whitelist/remove';
 
   return apiPost<RemoveFromWhitelistRequest, WhitelistOperationResponse>(
+    endpoint,
+    request,
+    { timeout: 60000 }
+  );
+}
+
+/**
+ * Initialize the global state UTxO for a new KYC token deployment.
+ * Uses the /global-state/init endpoint (GlobalStateManageable — not WhitelistManageable).
+ */
+export async function initGlobalState(
+  request: GlobalStateInitRequest,
+  protocolTxHash?: string
+): Promise<GlobalStateInitResponse> {
+  const endpoint = protocolTxHash
+    ? `/compliance/global-state/init?protocolTxHash=${protocolTxHash}`
+    : '/compliance/global-state/init';
+
+  return apiPost<GlobalStateInitRequest, GlobalStateInitResponse>(
+    endpoint,
+    request,
+    { timeout: 60000 }
+  );
+}
+
+/**
+ * Add a trusted entity (verification key) to the global state.
+ * Uses the /global-state/add-entity endpoint.
+ */
+export async function addToGlobalState(
+  request: AddTrustedEntityRequest,
+  protocolTxHash?: string
+): Promise<TrustedEntityOperationResponse> {
+  const endpoint = protocolTxHash
+    ? `/compliance/global-state/add-entity?protocolTxHash=${protocolTxHash}`
+    : '/compliance/global-state/add-entity';
+
+  return apiPost<AddTrustedEntityRequest, TrustedEntityOperationResponse>(
+    endpoint,
+    request,
+    { timeout: 60000 }
+  );
+}
+
+/**
+ * Remove a trusted entity (verification key) from the global state.
+ * Uses the /global-state/remove-entity endpoint.
+ */
+export async function removeFromGlobalState(
+  request: RemoveTrustedEntityRequest,
+  protocolTxHash?: string
+): Promise<TrustedEntityOperationResponse> {
+  const endpoint = protocolTxHash
+    ? `/compliance/global-state/remove-entity?protocolTxHash=${protocolTxHash}`
+    : '/compliance/global-state/remove-entity';
+
+  return apiPost<RemoveTrustedEntityRequest, TrustedEntityOperationResponse>(
     endpoint,
     request,
     { timeout: 60000 }

@@ -65,15 +65,27 @@ export function KycBuildSignSubmitStep({
   // ---- BUILD ----
   const handleBuild = useCallback(async () => {
     if (!connected || !wallet) {
-      onError('Wallet not connected');
+      const msg = 'Wallet not connected';
+      setStatus('error');
+      setErrorMessage(msg);
+      showToastRef.current({ title: 'Wallet Not Connected', description: msg, variant: 'error' });
+      onError(msg);
       return;
     }
     if (!tokenDetails.assetName || !tokenDetails.quantity) {
-      onError('Token details missing');
+      const msg = 'Token details are missing. Please go back and complete the Token Details step.';
+      setStatus('error');
+      setErrorMessage(msg);
+      showToastRef.current({ title: 'Token Details Missing', description: msg, variant: 'error' });
+      onError(msg);
       return;
     }
     if (!globalStatePolicyId) {
-      onError('Global State Policy ID is required');
+      const msg = 'Global State Policy ID is missing. Please go back and complete the KYC Configuration step.';
+      setStatus('error');
+      setErrorMessage(msg);
+      showToastRef.current({ title: 'Global State Not Initialized', description: msg, variant: 'error' });
+      onError(msg);
       return;
     }
 
@@ -256,6 +268,21 @@ export function KycBuildSignSubmitStep({
       {/* Idle state */}
       {status === 'idle' && (
         <>
+          {!globalStatePolicyId && (
+            <Card className="p-4 bg-yellow-500/10 border-yellow-500/30">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <p className="text-yellow-300 font-medium text-sm">Global State Not Initialized</p>
+                  <p className="text-yellow-200/70 text-sm mt-1">
+                    The KYC Configuration step has not been completed. Please go back and initialize the Global State before building the registration.
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
           <Card className="p-4 space-y-3">
             <h4 className="font-medium text-white">Registration Summary</h4>
             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -275,7 +302,9 @@ export function KycBuildSignSubmitStep({
               </div>
               <div className="col-span-2">
                 <span className="text-dark-400">Global State Policy ID</span>
-                <p className="text-white font-medium text-sm font-mono break-all">{globalStatePolicyId}</p>
+                <p className={`font-medium text-sm font-mono break-all ${globalStatePolicyId ? 'text-white' : 'text-yellow-400 italic'}`}>
+                  {globalStatePolicyId || 'Not initialized — go back to KYC Configuration'}
+                </p>
               </div>
               {tokenDetails.recipientAddress && (
                 <div className="col-span-2">
@@ -435,7 +464,8 @@ export function KycBuildSignSubmitStep({
             variant="primary"
             className="flex-1"
             onClick={handleBuild}
-            disabled={isProcessing || !connected}
+            disabled={isProcessing || !connected || !globalStatePolicyId}
+            title={!globalStatePolicyId ? 'Go back to complete the KYC Configuration step first' : undefined}
           >
             Build Registration
           </Button>

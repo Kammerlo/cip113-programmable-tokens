@@ -38,7 +38,10 @@ import org.cardanofoundation.cip113.repository.GlobalStateInitRepository;
 import org.cardanofoundation.cip113.service.*;
 import org.cardanofoundation.cip113.service.substandard.capabilities.BasicOperations;
 import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable;
-import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.AddTrustedEntityRequest;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateInitRequest;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateInitResult;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.RemoveTrustedEntityRequest;
 import org.cardanofoundation.cip113.service.substandard.context.KycContext;
 import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
@@ -71,7 +74,7 @@ import static java.math.BigInteger.ONE;
 @Scope("prototype")
 @RequiredArgsConstructor
 @Slf4j
-public class KycSubstandardHandler implements SubstandardHandler, BasicOperations<KycRegisterRequest>, WhitelistManageable, GlobalStateManageable {
+public class KycSubstandardHandler implements SubstandardHandler, BasicOperations<KycRegisterRequest>, GlobalStateManageable {
 
     private static final String SUBSTANDARD_ID = "kyc";
 
@@ -678,15 +681,15 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
         }
     }
 
-    // ========== WhitelistManageable Implementation (WhitelistManageable (Global State)) ==========
+    // ========== Global State Init / Entity Management ==========
 
     @Override
-    public TransactionContext<WhitelistInitResult> buildWhitelistInitTransaction(
-            WhitelistInitRequest request,
+    public TransactionContext<GlobalStateInitResult> buildGlobalStateInitTransaction(
+            GlobalStateInitRequest request,
             ProtocolBootstrapParams protocolParams) {
 
         try {
-            log.info("Global state init request: tokenPolicyId={}, admin={}", request.tokenPolicyId(), request.adminAddress());
+            log.info("Global state init request: admin={}", request.adminAddress());
 
             var adminAddress = new Address(request.adminAddress());
             var adminPkhBytes = adminAddress.getPaymentCredentialHash().get();
@@ -826,7 +829,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             }
 
             return TransactionContext.ok(transaction.serializeToHex(),
-                    new WhitelistInitResult(globalStateMintScript.getPolicyId()));
+                    new GlobalStateInitResult(globalStateMintScript.getPolicyId()));
 
         } catch (Exception e) {
             log.error("Global state init error", e);
@@ -835,14 +838,14 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
     }
 
     @Override
-    public TransactionContext<Void> buildAddToWhitelistTransaction(
-            AddToWhitelistRequest request,
+    public TransactionContext<Void> buildAddTrustedEntityTransaction(
+            AddTrustedEntityRequest request,
             ProtocolBootstrapParams protocolParams) {
 
         try {
-            log.info("Global state add entity: policyId={}, vkey={}", request.policyId(), request.targetCredential());
+            log.info("Global state add entity: policyId={}, vkey={}", request.policyId(), request.verificationKey());
 
-            var vkeyHex = request.targetCredential().trim();
+            var vkeyHex = request.verificationKey().trim();
             if (vkeyHex.length() != 64) {
                 return TransactionContext.typedError("Verification key must be 64 hex characters (32 bytes)");
             }
@@ -920,14 +923,14 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
     }
 
     @Override
-    public TransactionContext<Void> buildRemoveFromWhitelistTransaction(
-            RemoveFromWhitelistRequest request,
+    public TransactionContext<Void> buildRemoveTrustedEntityTransaction(
+            RemoveTrustedEntityRequest request,
             ProtocolBootstrapParams protocolParams) {
 
         try {
-            log.info("Global state remove entity: policyId={}, vkey={}", request.policyId(), request.targetCredential());
+            log.info("Global state remove entity: policyId={}, vkey={}", request.policyId(), request.verificationKey());
 
-            var vkeyHex = request.targetCredential().trim();
+            var vkeyHex = request.verificationKey().trim();
 
             // Rebuild global state scripts from context
             var globalStateScripts = kycScriptBuilder.buildGlobalStateScripts(

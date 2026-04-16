@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { useToast } from '@/components/ui/use-toast';
-import { apiPost } from '@/lib/api/client';
 import { getSigningEntityVkey } from '@/lib/api/keri';
 import { useProtocolVersion } from '@/contexts/protocol-version-context';
 import { waitForTxConfirmation } from '@/lib/utils/tx-confirmation';
@@ -16,9 +15,9 @@ interface KycConfigData {
   globalStatePolicyId: string;
 }
 
-interface WhitelistInitResponse {
+interface GlobalStateInitResponse {
   unsignedCborTx: string;
-  metadata: { bootstrapParameters: string } | null;
+  metadata: { globalStatePolicyId: string } | null;
   isSuccessful: boolean;
   error: string | null;
 }
@@ -169,39 +168,21 @@ export function KycConfigStep({
       const addresses = await wallet.getUsedAddresses();
       const adminAddress = addresses[0];
 
-      // 2. Get a UTxO for bootstrap
-      const utxos = await wallet.getUtxos();
-      if (!utxos || utxos.length === 0) {
-        showToast({
-          title: 'No UTxOs',
-          description: 'No UTxOs found in wallet. Please fund your wallet first.',
-          variant: 'error',
-        });
-        return;
-      }
-
-      const bootstrapUtxo = utxos[0];
-
-      // 3. Build global state init transaction
+      // 2. Build global state init transaction
       setStatusMessage('Building Global State transaction...');
-      const endpoint = selectedVersion?.txHash
-        ? `/compliance/whitelist/init?protocolTxHash=${selectedVersion.txHash}`
-        : '/compliance/whitelist/init';
+      const { initGlobalState } = await import('@/lib/api/compliance');
 
-      const response = await apiPost<unknown, WhitelistInitResponse>(
-        endpoint,
+      const response = await initGlobalState(
         {
           substandardId: 'kyc',
           adminAddress,
-          bootstrapTxHash: bootstrapUtxo.input.txHash,
-          bootstrapOutputIndex: bootstrapUtxo.input.outputIndex,
           initialVkeys: trustedEntities,
           initialTransfersPaused: false,
           initialMintableAmount: mintableAmount ? parseInt(mintableAmount, 10) : 0,
           initialSecurityInfo: securityInfo || undefined,
         },
-        { timeout: 60000 }
-      );
+        selectedVersion?.txHash
+      ) as GlobalStateInitResponse;
 
       if (!response.isSuccessful || !response.unsignedCborTx) {
         showToast({
@@ -217,7 +198,7 @@ export function KycConfigStep({
       const signedTx = await wallet.signTx(response.unsignedCborTx, true);
       const txHash = await wallet.submitTx(signedTx);
 
-      const globalStatePolicyId = response.metadata?.bootstrapParameters || '';
+      const globalStatePolicyId = response.metadata?.globalStatePolicyId || '';
 
       showToast({
         title: 'Global State Submitted',

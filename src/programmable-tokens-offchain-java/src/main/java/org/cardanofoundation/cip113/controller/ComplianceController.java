@@ -20,13 +20,17 @@ import org.cardanofoundation.cip113.service.substandard.capabilities.BlacklistMa
 import org.cardanofoundation.cip113.service.substandard.capabilities.BlacklistManageable.RemoveFromBlacklistRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.Seizeable.MultiSeizeRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.Seizeable.SeizeRequest;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.AddTrustedEntityRequest;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateInitRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateUpdateRequest;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.RemoveTrustedEntityRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable.AddToWhitelistRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable.RemoveFromWhitelistRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.WhitelistManageable.WhitelistInitRequest;
 import org.cardanofoundation.cip113.service.substandard.KycSubstandardHandler;
 import org.cardanofoundation.cip113.service.substandard.context.FreezeAndSeizeContext;
 import org.cardanofoundation.cip113.service.substandard.context.KycContext;
+import org.cardanofoundation.cip113.service.substandard.context.SubstandardContext;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -295,10 +299,12 @@ public class ComplianceController {
     }
 
     // ========== Whitelist Endpoints ==========
+    // Used by substandardss that maintain an on-chain address whitelist (linked-list pattern).
+    // KYC does NOT use these endpoints — it uses the /global-state/* endpoints instead.
 
     /**
      * Initialize a whitelist for a programmable token (security token).
-     * Creates the on-chain linked list structure for tracking KYC-approved addresses.
+     * Creates the on-chain linked list structure for tracking approved addresses.
      * Requires the token to be already registered in the programmable token registry.
      *
      * @param request        The whitelist initialization request (contains tokenPolicyId)
@@ -314,15 +320,11 @@ public class ComplianceController {
                 request.tokenPolicyId(), request.adminAddress());
 
         try {
-            // Resolve substandard: prefer explicit substandardId, fall back to resolving from policyId
             var substandardId = request.substandardId() != null && !request.substandardId().isBlank()
                     ? request.substandardId()
                     : resolveSubstandardId(request.tokenPolicyId());
 
-            var context = switch (substandardId) {
-                case "kyc" -> KycContext.emptyContext();
-                default -> null;
-            };
+            SubstandardContext context = null; // extend with a switch when a whitelist-based substandard needs context
 
             var txContext = complianceOperationsService.initWhitelist(
                     substandardId, request, protocolTxHash, context);
@@ -346,8 +348,8 @@ public class ComplianceController {
     }
 
     /**
-     * Add an address to the whitelist (grant KYC approval).
-     * Once whitelisted, the address can receive and transfer the security token.
+     * Add an address to the whitelist (grant approval).
+     * Once whitelisted, the address can receive and transfer the token.
      *
      * @param request        The add to whitelist request (contains policyId)
      * @param protocolTxHash Optional protocol version tx hash
@@ -362,29 +364,9 @@ public class ComplianceController {
                 request.policyId(), request.targetCredential());
 
         try {
-            // Resolve substandard from policyId via unified registry
             var substandardId = resolveSubstandardId(request.policyId());
 
-            var context = switch (substandardId) {
-                case "kyc" -> {
-                    var kycDataOpt = kycTokenRegistrationRepository
-                            .findByProgrammableTokenPolicyId(request.policyId());
-                    if (kycDataOpt.isEmpty()) {
-                        throw new RuntimeException("could not find KYC token registration");
-                    }
-                    var kycData = kycDataOpt.get();
-                    var gsInit = kycData.getGlobalStateInit();
-                    yield KycContext.builder()
-                            .issuerAdminPkh(kycData.getIssuerAdminPkh())
-                            .globalStatePolicyId(gsInit.getGlobalStatePolicyId())
-                            .globalStateInitTxInput(TransactionInput.builder()
-                                    .transactionId(gsInit.getTxHash())
-                                    .index(gsInit.getOutputIndex())
-                                    .build())
-                            .build();
-                }
-                default -> null;
-            };
+            SubstandardContext context = null; // extend with a switch when a whitelist-based substandard needs context
 
             var txContext = complianceOperationsService.addToWhitelist(
                     substandardId, request, protocolTxHash, context);
@@ -408,8 +390,8 @@ public class ComplianceController {
     }
 
     /**
-     * Remove an address from the whitelist (revoke KYC approval).
-     * Once removed, the address can no longer receive the security token.
+     * Remove an address from the whitelist (revoke approval).
+     * Once removed, the address can no longer receive the token.
      *
      * @param request        The remove from whitelist request (contains policyId)
      * @param protocolTxHash Optional protocol version tx hash
@@ -424,29 +406,9 @@ public class ComplianceController {
                 request.policyId(), request.targetCredential());
 
         try {
-            // Resolve substandard from policyId via unified registry
             var substandardId = resolveSubstandardId(request.policyId());
 
-            var context = switch (substandardId) {
-                case "kyc" -> {
-                    var kycDataOpt = kycTokenRegistrationRepository
-                            .findByProgrammableTokenPolicyId(request.policyId());
-                    if (kycDataOpt.isEmpty()) {
-                        throw new RuntimeException("could not find KYC token registration");
-                    }
-                    var kycData = kycDataOpt.get();
-                    var gsInit = kycData.getGlobalStateInit();
-                    yield KycContext.builder()
-                            .issuerAdminPkh(kycData.getIssuerAdminPkh())
-                            .globalStatePolicyId(gsInit.getGlobalStatePolicyId())
-                            .globalStateInitTxInput(TransactionInput.builder()
-                                    .transactionId(gsInit.getTxHash())
-                                    .index(gsInit.getOutputIndex())
-                                    .build())
-                            .build();
-                }
-                default -> null;
-            };
+            SubstandardContext context = null; // extend with a switch when a whitelist-based substandard needs context
 
             var txContext = complianceOperationsService.removeFromWhitelist(
                     substandardId, request, protocolTxHash, context);
@@ -470,6 +432,165 @@ public class ComplianceController {
     }
 
     // ========== Global State Endpoints ==========
+    // Used by the KYC substandard. Routes through GlobalStateManageable — not WhitelistManageable.
+
+    /**
+     * Initialize the global state UTxO for a KYC token deployment.
+     *
+     * @param request        The global state initialization request
+     * @param protocolTxHash Optional protocol version tx hash
+     * @return Unsigned CBOR transaction hex and minted policy ID
+     */
+    @PostMapping("/global-state/init")
+    public ResponseEntity<?> initGlobalState(
+            @RequestBody GlobalStateInitRequest request,
+            @RequestParam(required = false) String protocolTxHash) {
+
+        log.info("POST /compliance/global-state/init - substandardId: {}, admin: {}",
+                request.substandardId(), request.adminAddress());
+
+        try {
+            var substandardId = request.substandardId();
+
+            var context = switch (substandardId) {
+                case "kyc" -> KycContext.emptyContext();
+                default -> (SubstandardContext) null;
+            };
+
+            var txContext = complianceOperationsService.initGlobalState(
+                    substandardId, request, protocolTxHash, context);
+
+            if (txContext.isSuccessful()) {
+                return ResponseEntity.ok(txContext);
+            } else {
+                return ResponseEntity.badRequest().body(txContext.error());
+            }
+
+        } catch (UnsupportedOperationException e) {
+            log.warn("Capability not supported: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid request: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            log.error("Error initializing global state", e);
+            return ResponseEntity.internalServerError().body(e.getMessage());
+        }
+    }
+
+    /**
+     * Add a trusted entity (verification key) to the global state.
+     *
+     * @param request        The add-entity request
+     * @param protocolTxHash Optional protocol version tx hash
+     * @return Unsigned CBOR transaction hex
+     */
+    @PostMapping("/global-state/add-entity")
+    public ResponseEntity<?> addToGlobalState(
+            @RequestBody AddTrustedEntityRequest request,
+            @RequestParam(required = false) String protocolTxHash) {
+
+        log.info("POST /compliance/global-state/add-entity - policyId: {}, vkey: {}",
+                request.policyId(), request.verificationKey());
+
+        try {
+            var substandardId = resolveSubstandardId(request.policyId());
+
+            var context = switch (substandardId) {
+                case "kyc" -> {
+                    var kycData = kycTokenRegistrationRepository
+                            .findByProgrammableTokenPolicyId(request.policyId())
+                            .orElseThrow(() -> new RuntimeException("could not find KYC token registration"));
+                    var gsInit = kycData.getGlobalStateInit();
+                    yield KycContext.builder()
+                            .issuerAdminPkh(kycData.getIssuerAdminPkh())
+                            .globalStatePolicyId(gsInit.getGlobalStatePolicyId())
+                            .globalStateInitTxInput(TransactionInput.builder()
+                                    .transactionId(gsInit.getTxHash())
+                                    .index(gsInit.getOutputIndex())
+                                    .build())
+                            .build();
+                }
+                default -> (SubstandardContext) null;
+            };
+
+            var txContext = complianceOperationsService.addTrustedEntity(
+                    substandardId, request, protocolTxHash, context);
+
+            if (txContext.isSuccessful()) {
+                return ResponseEntity.ok(txContext);
+            } else {
+                return ResponseEntity.badRequest().body(txContext.error());
+            }
+
+        } catch (UnsupportedOperationException e) {
+            log.warn("Capability not supported: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid request: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            log.error("Error adding trusted entity to global state", e);
+            return ResponseEntity.internalServerError().body(e.getMessage());
+        }
+    }
+
+    /**
+     * Remove a trusted entity (verification key) from the global state.
+     *
+     * @param request        The remove-entity request
+     * @param protocolTxHash Optional protocol version tx hash
+     * @return Unsigned CBOR transaction hex
+     */
+    @PostMapping("/global-state/remove-entity")
+    public ResponseEntity<?> removeFromGlobalState(
+            @RequestBody RemoveTrustedEntityRequest request,
+            @RequestParam(required = false) String protocolTxHash) {
+
+        log.info("POST /compliance/global-state/remove-entity - policyId: {}, vkey: {}",
+                request.policyId(), request.verificationKey());
+
+        try {
+            var substandardId = resolveSubstandardId(request.policyId());
+
+            var context = switch (substandardId) {
+                case "kyc" -> {
+                    var kycData = kycTokenRegistrationRepository
+                            .findByProgrammableTokenPolicyId(request.policyId())
+                            .orElseThrow(() -> new RuntimeException("could not find KYC token registration"));
+                    var gsInit = kycData.getGlobalStateInit();
+                    yield KycContext.builder()
+                            .issuerAdminPkh(kycData.getIssuerAdminPkh())
+                            .globalStatePolicyId(gsInit.getGlobalStatePolicyId())
+                            .globalStateInitTxInput(TransactionInput.builder()
+                                    .transactionId(gsInit.getTxHash())
+                                    .index(gsInit.getOutputIndex())
+                                    .build())
+                            .build();
+                }
+                default -> (SubstandardContext) null;
+            };
+
+            var txContext = complianceOperationsService.removeTrustedEntity(
+                    substandardId, request, protocolTxHash, context);
+
+            if (txContext.isSuccessful()) {
+                return ResponseEntity.ok(txContext);
+            } else {
+                return ResponseEntity.badRequest().body(txContext.error());
+            }
+
+        } catch (UnsupportedOperationException e) {
+            log.warn("Capability not supported: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid request: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            log.error("Error removing trusted entity from global state", e);
+            return ResponseEntity.internalServerError().body(e.getMessage());
+        }
+    }
 
     /**
      * Read the current on-chain global state for a KYC token.

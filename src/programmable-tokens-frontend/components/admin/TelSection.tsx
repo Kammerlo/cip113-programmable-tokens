@@ -73,22 +73,22 @@ export function TelSection({ tokens, adminAddress }: TelSectionProps) {
     try {
       setIsBuilding(true);
 
-      const { addToWhitelist, removeFromWhitelist } = await import(
+      const { addToGlobalState, removeFromGlobalState } = await import(
         "@/lib/api/compliance"
       );
 
       const request = {
         adminAddress: adminAddress,
-        targetCredential: targetVkey.trim(),
+        verificationKey: targetVkey.trim(),
         policyId: selectedToken.policyId,
       };
 
       let unsignedCborTx: string;
       if (action === "add") {
-        const response = await addToWhitelist(request, selectedVersion?.txHash);
+        const response = await addToGlobalState(request, selectedVersion?.txHash);
         unsignedCborTx = response.unsignedCborTx;
       } else {
-        const response = await removeFromWhitelist(request, selectedVersion?.txHash);
+        const response = await removeFromGlobalState(request, selectedVersion?.txHash);
         unsignedCborTx = response.unsignedCborTx;
       }
 
