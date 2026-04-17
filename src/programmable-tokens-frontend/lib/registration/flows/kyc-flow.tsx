@@ -12,7 +12,7 @@ import type {
   StepComponentProps,
 } from '@/types/registration';
 import { TokenDetailsStep } from '@/components/register/steps/token-details-step';
-import { KycConfigStep, KycBuildSignSubmitStep } from '@/components/register/steps/kyc';
+import { KycConfigStep, KycCip170Step, KycBuildSignSubmitStep } from '@/components/register/steps/kyc';
 import { SuccessStep } from '@/components/register/steps/success-step';
 
 function KycSuccessStep(props: StepComponentProps) {
@@ -42,6 +42,13 @@ const kycFlow: RegistrationFlow = {
   description: 'Programmable token requiring KYC attestation for transfers. Uses a Global State for verifying transfer authorization.',
   enabled: isFlowEnabled('kyc', true),
   steps: [
+    {
+      id: 'cip170-auth-begin',
+      title: 'CIP-170 Auth (Optional)',
+      description: 'Publish your credential chain on-chain (only needs to be done once)',
+      requiresWalletSign: true,
+      component: KycCip170Step as React.ComponentType<StepComponentProps<unknown, unknown>>,
+    },
     {
       id: 'token-details',
       title: 'Token Details',

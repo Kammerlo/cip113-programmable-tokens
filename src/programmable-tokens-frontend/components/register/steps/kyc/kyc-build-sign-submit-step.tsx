@@ -9,10 +9,17 @@ import { CopyButton } from '@/components/ui/copy-button';
 import { useToast } from '@/components/ui/use-toast';
 import { useProtocolVersion } from '@/contexts/protocol-version-context';
 import { registerToken, stringToHex } from '@/lib/api';
+import {
+  getAgentOobi,
+  resolveOobi,
+  storeCardanoAddress,
+  requestAttestation,
+} from '@/lib/api/keri';
 import { getPaymentKeyHash } from '@/lib/utils/address';
 import { getExplorerTxUrl } from '@/lib/utils/format';
-import type { KycRegisterRequest } from '@/types/api';
+import type { KycRegisterRequest, Cip170AttestationData } from '@/types/api';
 import type { StepComponentProps, TokenDetailsData } from '@/types/registration';
+import { Shield, Copy, QrCode } from 'lucide-react';
 
 type BuildStatus =
   | 'idle'
@@ -49,6 +56,12 @@ export function KycBuildSignSubmitStep({
   const [derivedTxHash, setDerivedTxHash] = useState('');
   const [regTxHash, setRegTxHash] = useState('');
 
+  // CIP-170 attestation state
+  const [enableAttestation, setEnableAttestation] = useState(false);
+  const [attestationData, setAttestationData] = useState<Cip170AttestationData | null>(null);
+  const [attestError, setAttestError] = useState<string | null>(null);
+  const [isAttesting, setIsAttesting] = useState(false);
+
   const showToastRef = useRef(showToast);
   useEffect(() => { showToastRef.current = showToast; }, [showToast]);
 
@@ -61,6 +74,24 @@ export function KycBuildSignSubmitStep({
     const kycState = wizardState.stepStates['kyc-config'];
     return (kycState?.data as { globalStatePolicyId?: string })?.globalStatePolicyId || '';
   }, [wizardState.stepStates]);
+
+  // Get session ID from CIP-170 step if completed
+  const cip170SessionId = useMemo(() => {
+    const cip170State = wizardState.stepStates['cip170-auth-begin'];
+    return (cip170State?.data as { sessionId?: string })?.sessionId || null;
+  }, [wizardState.stepStates]);
+
+  // OOBI connection state (for attestation when AUTH_BEGIN was skipped)
+  const [attestSessionId, setAttestSessionId] = useState<string | null>(null);
+  const [oobiUrl, setOobiUrl] = useState<string | null>(null);
+  const [oobiCopied, setOobiCopied] = useState(false);
+  const [partnerOobi, setPartnerOobi] = useState('');
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isOobiConnected, setIsOobiConnected] = useState(!!cip170SessionId);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  // Effective session ID: from AUTH_BEGIN or from inline OOBI connect
+  const effectiveSessionId = cip170SessionId || attestSessionId;
 
   // ---- BUILD ----
   const handleBuild = useCallback(async () => {
@@ -113,6 +144,7 @@ export function KycBuildSignSubmitStep({
         recipientAddress: tokenDetails.recipientAddress || '',
         adminPubKeyHash,
         globalStatePolicyId,
+        ...(attestationData ? { attestation: attestationData } : {}),
       };
 
       const regResponse = await registerToken(regRequest, selectedVersion?.txHash);
@@ -139,7 +171,86 @@ export function KycBuildSignSubmitStep({
     } finally {
       setProcessing(false);
     }
-  }, [connected, wallet, tokenDetails, globalStatePolicyId, selectedVersion, onError, setProcessing]);
+  }, [connected, wallet, tokenDetails, globalStatePolicyId, selectedVersion, attestationData, onError, setProcessing]);
+
+  // ---- OOBI CONNECT (for attestation without AUTH_BEGIN) ----
+  const handleLoadOobi = useCallback(async () => {
+    try {
+      setIsConnecting(true);
+      setConnectError(null);
+      const newSessionId = crypto.randomUUID();
+      setAttestSessionId(newSessionId);
+      const data = await getAgentOobi(newSessionId);
+      setOobiUrl(data.oobi);
+    } catch {
+      setConnectError('Failed to load agent OOBI');
+    } finally {
+      setIsConnecting(false);
+    }
+  }, []);
+
+  const handleResolveOobi = useCallback(async () => {
+    if (!partnerOobi.trim() || !attestSessionId) return;
+    try {
+      setIsConnecting(true);
+      setConnectError(null);
+      await resolveOobi(attestSessionId, partnerOobi.trim());
+      const addresses = await wallet.getUsedAddresses();
+      if (addresses?.[0]) {
+        await storeCardanoAddress(attestSessionId, addresses[0]);
+      }
+      setIsOobiConnected(true);
+      showToastRef.current({
+        title: 'Connected',
+        description: 'OOBI resolved. You can now anchor the attestation.',
+        variant: 'success',
+      });
+    } catch {
+      setConnectError('Failed to resolve OOBI. Make sure the URL is correct.');
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [partnerOobi, attestSessionId, wallet]);
+
+  // ---- ATTESTATION ----
+  const handleAttestation = useCallback(async () => {
+    if (!effectiveSessionId || !tokenDetails.assetName || !tokenDetails.quantity) return;
+
+    try {
+      setIsAttesting(true);
+      setAttestError(null);
+
+      const unit = stringToHex(tokenDetails.assetName);
+      const attestData = await requestAttestation(
+        effectiveSessionId,
+        unit,
+        tokenDetails.quantity
+      );
+
+      setAttestationData(attestData);
+
+      showToastRef.current({
+        title: 'Attestation Anchored',
+        description: 'Digest anchored in KEL. You can now build the registration transaction.',
+        variant: 'success',
+      });
+    } catch (error) {
+      console.error('Attestation error:', error);
+      let errorMessage = 'Failed to anchor attestation';
+      if (error instanceof Error) {
+        if (error.message.includes('408')) {
+          errorMessage = 'Wallet did not respond to anchor request in time.';
+        } else if (error.message.includes('409')) {
+          errorMessage = 'Attestation request was cancelled.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      setAttestError(errorMessage);
+    } finally {
+      setIsAttesting(false);
+    }
+  }, [effectiveSessionId, tokenDetails]);
 
   // ---- SIGN & SUBMIT ----
   const handleSignAndSubmit = useCallback(async () => {
@@ -331,6 +442,132 @@ export function KycBuildSignSubmitStep({
               </div>
             </div>
           </Card>
+
+          {/* CIP-170 Attestation Toggle */}
+          <Card className="p-4">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableAttestation}
+                onChange={(e) => {
+                  setEnableAttestation(e.target.checked);
+                  if (!e.target.checked) {
+                    setAttestationData(null);
+                    setAttestError(null);
+                  }
+                }}
+                disabled={isProcessing}
+                className="w-4 h-4 rounded border-dark-600 bg-dark-800 text-primary-500 focus:ring-primary-500"
+              />
+              <div>
+                <p className="text-sm text-white font-medium">
+                  Enable CIP-170 Attestation
+                </p>
+                <p className="text-xs text-dark-400">
+                  Attest this registration with your Veridian wallet (anchors digest in
+                  KEL and attaches ATTEST metadata to the registration transaction)
+                </p>
+              </div>
+            </label>
+
+            {enableAttestation && !attestationData && (
+              <div className="mt-4 space-y-3">
+                {(connectError || attestError) && (
+                  <div className="px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                    <p className="text-sm text-red-400">{connectError || attestError}</p>
+                  </div>
+                )}
+
+                {/* Step 1: OOBI connect (only when no session from AUTH_BEGIN) */}
+                {!isOobiConnected && !oobiUrl && (
+                  <Button
+                    variant="primary"
+                    className="w-full"
+                    onClick={handleLoadOobi}
+                    isLoading={isConnecting}
+                    disabled={isConnecting}
+                  >
+                    <QrCode className="h-4 w-4 mr-2" />
+                    {isConnecting ? 'Loading...' : 'Connect Veridian Wallet'}
+                  </Button>
+                )}
+
+                {/* Step 2: Share agent OOBI */}
+                {!isOobiConnected && oobiUrl && !partnerOobi && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-dark-400">
+                      Share this OOBI URL with your Veridian wallet, then paste your wallet&apos;s OOBI below.
+                    </p>
+                    <div className="px-3 py-2 bg-dark-900 rounded-lg">
+                      <p className="text-xs text-primary-400 font-mono break-all">{oobiUrl}</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        navigator.clipboard.writeText(oobiUrl);
+                        setOobiCopied(true);
+                        setTimeout(() => setOobiCopied(false), 2000);
+                      }}
+                    >
+                      <Copy className="h-4 w-4 mr-2" />
+                      {oobiCopied ? 'Copied!' : 'Copy OOBI'}
+                    </Button>
+                  </div>
+                )}
+
+                {/* Step 3: Paste wallet OOBI + resolve */}
+                {!isOobiConnected && oobiUrl && (
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={partnerOobi}
+                      onChange={(e) => setPartnerOobi(e.target.value)}
+                      placeholder="Paste your Veridian wallet OOBI..."
+                      className="w-full px-3 py-2 bg-dark-900 border border-dark-700 rounded-lg text-sm text-white placeholder-dark-500 focus:outline-none focus:border-primary-500"
+                    />
+                    <Button
+                      variant="primary"
+                      className="w-full"
+                      onClick={handleResolveOobi}
+                      isLoading={isConnecting}
+                      disabled={!partnerOobi.trim() || isConnecting}
+                    >
+                      {isConnecting ? 'Resolving...' : 'Resolve & Connect'}
+                    </Button>
+                  </div>
+                )}
+
+                {/* Step 4: Anchor attestation (session ready) */}
+                {isOobiConnected && (
+                  <Button
+                    variant="primary"
+                    className="w-full"
+                    onClick={handleAttestation}
+                    isLoading={isAttesting}
+                    disabled={isAttesting}
+                  >
+                    {isAttesting ? 'Waiting for wallet...' : 'Anchor Digest & Attest'}
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {attestationData && (
+              <div className="mt-4 px-4 py-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <Shield className="h-4 w-4 text-green-400" />
+                  <span className="text-sm text-green-400 font-medium">Attestation Anchored</span>
+                </div>
+                <p className="text-xs text-dark-300">
+                  Signer: {attestationData.signerAid}
+                </p>
+                <p className="text-xs text-dark-300">
+                  Digest: {attestationData.digest}
+                </p>
+              </div>
+            )}
+          </Card>
         </>
       )}
 
@@ -432,6 +669,16 @@ export function KycBuildSignSubmitStep({
                 <p className="text-sm text-primary-400 font-mono break-all">{regTxHash}</p>
               </div>
             )}
+            {attestationData && (
+              <div className="p-3 bg-dark-800 rounded">
+                <div className="flex items-center gap-2 mb-2">
+                  <Shield className="h-4 w-4 text-green-400" />
+                  <span className="text-xs text-green-400 font-medium">CIP-170 Attested</span>
+                </div>
+                <p className="text-xs text-dark-300">Signer: {attestationData.signerAid}</p>
+                <p className="text-xs text-dark-300">Digest: {attestationData.digest}</p>
+              </div>
+            )}
           </div>
         </Card>
       )}
@@ -464,8 +711,14 @@ export function KycBuildSignSubmitStep({
             variant="primary"
             className="flex-1"
             onClick={handleBuild}
-            disabled={isProcessing || !connected || !globalStatePolicyId}
-            title={!globalStatePolicyId ? 'Go back to complete the KYC Configuration step first' : undefined}
+            disabled={isProcessing || !connected || !globalStatePolicyId || (enableAttestation && !attestationData)}
+            title={
+              !globalStatePolicyId
+                ? 'Go back to complete the KYC Configuration step first'
+                : enableAttestation && !attestationData
+                  ? 'Complete the attestation step first'
+                  : undefined
+            }
           >
             Build Registration
           </Button>

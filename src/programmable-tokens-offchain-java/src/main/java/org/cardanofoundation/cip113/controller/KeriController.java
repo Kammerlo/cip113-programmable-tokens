@@ -1,12 +1,14 @@
 package org.cardanofoundation.cip113.controller;
 
+import com.bloxbean.cardano.client.metadata.MetadataBuilder;
+import com.bloxbean.cardano.client.metadata.MetadataList;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.cardanofoundation.cip113.config.SchemaConfig;
 import org.cardanofoundation.cip113.entity.KycSessionEntity;
-import org.cardanofoundation.cip113.model.Role;
+import org.cardanofoundation.cip113.model.*;
 import org.cardanofoundation.cip113.model.keri.*;
 import org.cardanofoundation.cip113.repository.KycSessionRepository;
 import org.cardanofoundation.cip113.service.KycProofService;
@@ -23,6 +25,8 @@ import org.cardanofoundation.signify.app.credentialing.ipex.IpexGrantArgs;
 import org.cardanofoundation.signify.app.credentialing.registries.CreateRegistryArgs;
 import org.cardanofoundation.signify.app.credentialing.registries.RegistryResult;
 import org.cardanofoundation.signify.cesr.Serder;
+import org.cardanofoundation.signify.cesr.util.CESRStreamUtil;
+import org.cardanofoundation.signify.cesr.util.CESRStreamUtil;
 import org.cardanofoundation.signify.cesr.util.Utils;
 import org.cardanofoundation.signify.core.States;
 import org.springframework.beans.factory.annotation.Value;
@@ -52,6 +56,8 @@ public class KeriController {
     private final KycProofService kycProofService;
     private final SchemaConfig schemaConfig;
     private final ObjectMapper objectMapper;
+    private final org.cardanofoundation.cip113.service.AccountService accountService;
+    private final com.bloxbean.cardano.client.quicktx.QuickTxBuilder quickTxBuilder;
 
     private static final Pattern OOBI_AID_PATTERN = Pattern.compile("/oobi/([^/]+)");
     private static final DateTimeFormatter KERI_DATETIME =
@@ -517,6 +523,219 @@ public class KeriController {
             return ResponseEntity.ok(proof);
         } catch (Exception e) {
             log.error("kyc-proof/generate failed", e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // ── CIP-170 Credential Chain Publishing & Attestation ───────────────────────
+
+    @PostMapping("/credential-chain/publish")
+    public ResponseEntity<?> publishCredentialChain(
+            @RequestHeader(value = "X-Session-Id", required = false) String sessionId,
+            @RequestBody CredentialChainPublishRequest request) {
+        if (sessionId == null || !kycSessionRepository.existsById(sessionId)) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unknown session"));
+        }
+        KycSessionEntity kyc = kycSessionRepository.findById(sessionId).get();
+        if (kyc.getCredentialAid() == null) {
+            return ResponseEntity.badRequest().body(
+                    Map.of("error", "No credential on record — please present a credential first"));
+        }
+
+        try {
+            // Fetch full CESR credential chain
+            String credentialSaid = kyc.getCredentialAid();
+            
+            Optional<String> cesrOpt = client.credentials().getCESR(credentialSaid);
+            if (cesrOpt.isEmpty()) {
+                return ResponseEntity.badRequest().body(
+                        Map.of("error", "Credential chain not found for SAID: " + credentialSaid));
+            }
+            String cesrChain = cesrOpt.get();
+            List<Map<String, Object>> cesrData = CESRStreamUtil.parseCESRData(cesrChain);
+            String strippedCesrChain = strip(cesrData);
+            byte[][] chunks = splitIntoChunks(strippedCesrChain.getBytes(), 64);
+            MetadataList credentialChunks = MetadataBuilder.createList();
+            for (byte[] chunk : chunks) {
+                credentialChunks.add(chunk);
+            }
+            // Build CIP-170 AUTH_BEGIN metadata at label 170
+            var cip170Map = com.bloxbean.cardano.client.metadata.MetadataBuilder.createMap();
+            cip170Map.put("t", "AUTH_BEGIN");
+            cip170Map.put("i", kyc.getAid());
+            cip170Map.put("s", kyc.getCredentialSaid());
+            // Credential chain as CESR string
+            cip170Map.put("c", credentialChunks);
+
+            var versionMap = com.bloxbean.cardano.client.metadata.MetadataBuilder.createMap();
+            versionMap.put("v", "1.0");
+            versionMap.put("k", "KERI10JSON");
+            versionMap.put("a", "ACDC10JSON");
+            cip170Map.put("v", versionMap);
+
+            var metadata = com.bloxbean.cardano.client.metadata.MetadataBuilder.createMetadata();
+            metadata.put(170L, cip170Map);
+
+            // Build simple transaction carrying only the AUTH_BEGIN metadata.
+            // payToAddress(self, 1 ADA) ensures at least one output; the rest is change.
+            var tx = new com.bloxbean.cardano.client.quicktx.Tx()
+                    .from(request.feePayerAddress())
+                    .payToAddress(request.feePayerAddress(), com.bloxbean.cardano.client.api.model.Amount.ada(1))
+                    .attachMetadata(metadata)
+                    .withChangeAddress(request.feePayerAddress());
+
+            var transaction = quickTxBuilder.compose(tx)
+                    .feePayer(request.feePayerAddress())
+                    .mergeOutputs(true)
+                    .build();
+
+            log.info("CIP-170 AUTH_BEGIN tx built for session={}, signer={}", sessionId, kyc.getAid());
+            return ResponseEntity.ok(transaction.serializeToHex());
+
+        } catch (Exception e) {
+            log.error("credential-chain/publish failed", e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+    private byte[][] splitIntoChunks(byte[] data, int chunkSize) {
+        int numChunks = (data.length + chunkSize - 1) / chunkSize;
+        byte[][] chunks = new byte[numChunks][];
+
+        for (int i = 0; i < numChunks; i++) {
+            int start = i * chunkSize;
+            int end = Math.min(start + chunkSize, data.length);
+            chunks[i] = Arrays.copyOfRange(data, start, end);
+        }
+
+        return chunks;
+    }
+
+    private String strip(List<Map<String, Object>> cesrData) {
+        List<Map<String, Object>> allVcpEvents = new ArrayList<>();
+        List<String> allVcpAttachments = new ArrayList<>();
+        List<Map<String, Object>> allIssEvents = new ArrayList<>();
+        List<String> allIssAttachments = new ArrayList<>();
+        List<Map<String, Object>> allAcdcEvents = new ArrayList<>();
+        List<String> allAcdcAttachments = new ArrayList<>();
+
+        for (Map<String, Object> eventData : cesrData) {
+            Map<String, Object> event = (Map<String, Object>) eventData.get("event");
+
+            // Check for event type
+            Object eventTypeObj = event.get("t");
+            if (eventTypeObj != null) {
+                String eventType = eventTypeObj.toString();
+                switch (eventType) {
+                    case "vcp":
+                        allVcpEvents.add(event);
+                        allVcpAttachments.add((String) eventData.get("atc"));
+                        break;
+                    case "iss":
+                        allIssEvents.add(event);
+                        allIssAttachments.add((String) eventData.get("atc"));
+                        break;
+                }
+            } else {
+                // Check if this is an ACDC (credential data) without "t" field
+                if (event.containsKey("s") && event.containsKey("a") && event.containsKey("i")) {
+                    Object schemaObj = event.get("s");
+                    if (schemaObj != null) {
+                        allAcdcEvents.add(event);
+                        allAcdcAttachments.add("");
+                    }
+                }
+            }
+        }
+
+        List<Map<String, Object>> combinedEvents = new ArrayList<>();
+        List<String> combinedAttachments = new ArrayList<>();
+
+        combinedEvents.addAll(allVcpEvents);
+        combinedEvents.addAll(allIssEvents);
+        combinedEvents.addAll(allAcdcEvents);
+
+        combinedAttachments.addAll(allVcpAttachments);
+        combinedAttachments.addAll(allIssAttachments);
+        combinedAttachments.addAll(allAcdcAttachments);
+
+        return CESRStreamUtil.makeCESRStream(combinedEvents, combinedAttachments);
+    }
+
+    @PostMapping("/attest/request")
+    public ResponseEntity<?> requestAttestation(
+            @RequestHeader(value = "X-Session-Id", required = false) String sessionId,
+            @RequestBody AttestAnchorRequest request) {
+        if (sessionId == null || !kycSessionRepository.existsById(sessionId)) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unknown session"));
+        }
+        KycSessionEntity kyc = kycSessionRepository.findById(sessionId).get();
+        String userAid = kyc.getAid();
+        if (userAid == null || userAid.isBlank()) {
+            return ResponseEntity.badRequest().body(
+                    Map.of("error", "No AID on record — please complete OOBI exchange first"));
+        }
+
+        try {
+            // Build payload and compute SAID
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("d", "");
+            payload.put("unit", request.unit());
+            payload.put("quantity", request.quantity());
+
+            var saidifyResult = org.cardanofoundation.signify.cesr.Saider.saidify(payload);
+            Map<String, Object> ked = saidifyResult.sad();
+            String digest = (String) ked.get("d");
+
+            log.info("SAID computed for attestation: digest={}, unit={}, quantity={}",
+                    digest, request.unit(), request.quantity());
+
+            // Send remotesign exchange message to user's wallet
+            var hab = client.identifiers().get(identifierName)
+                    .orElseThrow(() -> new IllegalStateException("Identifier not found: " + identifierName));
+
+            client.exchanges().send(identifierName, "remotesign",
+                    hab, "/remotesign/ixn/req", ked, Map.of(), List.of(userAid));
+
+            log.info("Remotesign ixn request sent to wallet AID={}, digest={}", userAid, digest);
+
+            // Wait for the wallet to respond on /remotesign/ixn/ref
+            IpexNotificationHelper.Notification refNote =
+                    IpexNotificationHelper.waitForNotification(client, "/remotesign/ixn/ref");
+            IpexNotificationHelper.markAndDelete(client, refNote);
+
+            // Query user's key state to get current sequence number after interact
+            Object keyStateResult = client.keyStates().query(identifierName, userAid);
+            client.operations().wait(Operation.fromObject(keyStateResult));
+
+            @SuppressWarnings("unchecked")
+            Optional<Object> keyStateOpt = client.keyStates().get(userAid);
+            if (keyStateOpt.isEmpty()) {
+                return ResponseEntity.internalServerError().body(
+                        Map.of("error", "Could not retrieve key state for AID: " + userAid));
+            }
+
+            // Extract sequence number from key state
+            @SuppressWarnings("unchecked")
+            Map<String, Object> keyState = (Map<String, Object>) keyStateOpt.get();
+            String seqNumber = keyState.get("s").toString();
+
+            var attestation = new Cip170AttestationData(userAid, digest, seqNumber, "1.0");
+            log.info("CIP-170 attestation anchored: signer={}, digest={}, seq={}",
+                    userAid, digest, seqNumber);
+
+            return ResponseEntity.ok(attestation);
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ResponseEntity.status(409).body(Map.of("error", "Attestation request cancelled."));
+        } catch (RuntimeException e) {
+            if (e.getMessage() != null && e.getMessage().startsWith("Timed out")) {
+                return ResponseEntity.status(408).body(
+                        Map.of("error", "Wallet did not respond to anchor request in time."));
+            }
+            throw e;
+        } catch (Exception e) {
+            log.error("attest/request failed", e);
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }

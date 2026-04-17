@@ -137,3 +137,44 @@ export async function issueCredential(
     sessionHeaders(sessionId)
   );
 }
+
+// ── CIP-170 Attestation ──────────────────────────────────────────────────────
+
+export interface Cip170AttestationData {
+  signerAid: string;
+  digest: string;
+  seqNumber: string;
+  cipVersion: string;
+}
+
+/**
+ * Publish credential chain on-chain as a CIP-170 AUTH_BEGIN transaction.
+ * Returns unsigned CBOR hex for wallet signing.
+ */
+export async function publishCredentialChain(
+  sessionId: string,
+  feePayerAddress: string
+): Promise<string> {
+  return apiPost<{ feePayerAddress: string }, string>(
+    '/keri/credential-chain/publish',
+    { feePayerAddress },
+    { ...sessionHeaders(sessionId), timeout: 60000 }
+  );
+}
+
+/**
+ * Request the user's Veridian wallet to anchor a digest for CIP-170 attestation.
+ * The backend sends an exchange message to the wallet and waits for the interact event.
+ * Returns the attestation data to be included in the mint transaction.
+ */
+export async function requestAttestation(
+  sessionId: string,
+  unit: string,
+  quantity: string
+): Promise<Cip170AttestationData> {
+  return apiPost<{ unit: string; quantity: string }, Cip170AttestationData>(
+    '/keri/attest/request',
+    { unit, quantity },
+    { ...sessionHeaders(sessionId), timeout: 120000 }
+  );
+}

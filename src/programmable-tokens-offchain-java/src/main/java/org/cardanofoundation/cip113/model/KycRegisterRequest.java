@@ -29,4 +29,9 @@ public class KycRegisterRequest extends RegisterTokenRequest {
      * The transfer validator will check KYC attestations against entities in the global state.
      */
     private String globalStatePolicyId;
+
+    /**
+     * Optional CIP-170 attestation data to attach as ATTEST metadata (label 170).
+     */
+    private Cip170AttestationData attestation;
 }

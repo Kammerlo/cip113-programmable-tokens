@@ -50,6 +50,7 @@ export interface KycRegisterRequest extends BaseRegisterTokenRequest {
   substandardId: 'kyc';
   adminPubKeyHash: string;         // Payment key hash derived from feePayerAddress
   globalStatePolicyId: string;     // Global State policy ID
+  attestation?: Cip170AttestationData;  // Optional CIP-170 attestation
 }
 
 /** Discriminated union of all registration request types */
@@ -64,12 +65,20 @@ export interface RegisterTokenResponse {
 // Minting (Admin - mint to existing registered token)
 // ============================================================================
 
+export interface Cip170AttestationData {
+  signerAid: string;
+  digest: string;
+  seqNumber: string;
+  cipVersion: string;
+}
+
 export interface MintTokenRequest {
   feePayerAddress: string;      // Issuer admin's wallet address
   tokenPolicyId: string;        // Policy ID of registered token
   assetName: string;            // HEX ENCODED token name
   quantity: string;             // Amount as string to handle large numbers
   recipientAddress: string;     // Recipient address
+  attestation?: Cip170AttestationData;  // Optional CIP-170 attestation
 }
 
 // Backend returns plain text CBOR hex string (not JSON)

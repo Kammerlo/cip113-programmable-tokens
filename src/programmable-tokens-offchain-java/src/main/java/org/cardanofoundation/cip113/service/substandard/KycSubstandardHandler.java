@@ -7,6 +7,8 @@ import com.bloxbean.cardano.client.api.model.Amount;
 import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.client.api.util.ValueUtil;
 import com.bloxbean.cardano.client.plutus.spec.*;
+import com.bloxbean.cardano.client.metadata.MetadataBuilder;
+import com.bloxbean.cardano.client.metadata.MetadataMap;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
 import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.transaction.spec.*;
@@ -331,6 +333,26 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     .attachRewardValidator(substandardIssueContract)
                     .withChangeAddress(request.getFeePayerAddress());
 
+            // Attach CIP-170 ATTEST metadata if attestation data is present
+            if (request.getAttestation() != null) {
+                var att = request.getAttestation();
+                MetadataMap versionMap = MetadataBuilder.createMap();
+                versionMap.put("v", att.cipVersion() != null ? att.cipVersion() : "1.0");
+
+                MetadataMap cip170Map = MetadataBuilder.createMap();
+                cip170Map.put("t", "ATTEST");
+                cip170Map.put("i", att.signerAid());
+                cip170Map.put("d", att.digest());
+                cip170Map.put("s", att.seqNumber());
+                cip170Map.put("v", versionMap);
+
+                var metadata = MetadataBuilder.createMetadata();
+                metadata.put(170L, cip170Map);
+                tx.attachMetadata(metadata);
+                log.info("CIP-170 ATTEST metadata attached to registration: signer={}, digest={}, seq={}",
+                        att.signerAid(), att.digest(), att.seqNumber());
+            }
+
             var firstUtxo = feePayerUtxos.getFirst();
             var transaction = quickTxBuilder.compose(tx)
                     .withRequiredSigners(adminPkh.getBytes())
@@ -432,6 +454,26 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     .payToContract(targetAddress.getAddress(), ValueUtil.toAmountList(programmableTokenValue), ConstrPlutusData.of(0))
                     .attachRewardValidator(substandardIssueContract)
                     .withChangeAddress(request.feePayerAddress());
+
+            // Attach CIP-170 ATTEST metadata if attestation data is present
+            if (request.attestation() != null) {
+                var att = request.attestation();
+                MetadataMap versionMap = MetadataBuilder.createMap();
+                versionMap.put("v", att.cipVersion() != null ? att.cipVersion() : "1.0");
+
+                MetadataMap cip170Map = MetadataBuilder.createMap();
+                cip170Map.put("t", "ATTEST");
+                cip170Map.put("i", att.signerAid());
+                cip170Map.put("d", att.digest());
+                cip170Map.put("s", att.seqNumber());
+                cip170Map.put("v", versionMap);
+
+                var metadata = MetadataBuilder.createMetadata();
+                metadata.put(170L, cip170Map);
+                tx.attachMetadata(metadata);
+                log.info("CIP-170 ATTEST metadata attached: signer={}, digest={}, seq={}",
+                        att.signerAid(), att.digest(), att.seqNumber());
+            }
 
             var transaction = quickTxBuilder.compose(tx)
                     .withRequiredSigners(adminPkh.getBytes())
