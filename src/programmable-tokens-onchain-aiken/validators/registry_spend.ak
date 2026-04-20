@@ -42,9 +42,7 @@ validator registry_spend(protocol_params_cs: PolicyId) {
     expect Some(minted_assets) =
       assets.to_dict(self.mint) |> dict.get(registry_node_cs)
     expect [Pair(_, amount)] = dict.to_pairs(minted_assets)
-    expect amount > 0
-
-    True
+    amount > 0
   }
 
   else(_) {
