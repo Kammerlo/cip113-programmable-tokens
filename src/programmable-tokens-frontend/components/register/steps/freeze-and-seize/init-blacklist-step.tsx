@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useWallet } from '@meshsdk/react';
+import { useWallet } from '@/hooks/use-wallet';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { CopyButton } from '@/components/ui/copy-button';
 import { useToast } from '@/components/ui/use-toast';
 import { useProtocolVersion } from '@/contexts/protocol-version-context';
 import { initBlacklist } from '@/lib/api/compliance';
+import { stringToHex } from '@/lib/api';
 import { waitForTxConfirmation } from '@/lib/utils/tx-confirmation';
 import type { StepComponentProps, BlacklistInitResult, TokenDetailsData } from '@/types/registration';
 
@@ -131,6 +132,7 @@ export function InitBlacklistStep({
           substandardId: 'freeze-and-seize',
           adminAddress,
           feePayerAddress: adminAddress,
+          assetName: stringToHex(tokenDetails?.assetName || ''),
         },
         selectedVersion?.txHash
       );

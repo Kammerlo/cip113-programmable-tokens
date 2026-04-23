@@ -5,12 +5,16 @@ use aiken/collection/list
 
 use cardano/address.{Credential, Inline, Script, VerificationKey}
 use cardano/assets.{PolicyId, quantity_of}
+use cardano/certificate.{Certificate}
 use cardano/transaction.{Input, Transaction, Withdraw}
 use types.{BlacklistProof, NonmembershipProof}
 use utils
 
 // Simple example: only allow transfers signed by a specific credential
-validator issuer_admin_contract(permitted_cred: Credential) {
+validator issuer_admin_contract(
+  permitted_cred: Credential,
+  _asset_name: PolicyId,
+) {
   withdraw(_redeemer: Data, _account: Credential, self: Transaction) {
     // This example transfer logic simply checks that a specific credential
     // has authorized the transfer
@@ -31,6 +35,10 @@ validator issuer_admin_contract(permitted_cred: Credential) {
         )
       }
     }
+  }
+
+  publish(_r: Data, _c: Certificate, _s: Transaction) {
+    True
   }
 
   else(_) {
@@ -150,6 +158,10 @@ validator transfer(
         witnesses,
       ),
     }
+  }
+
+  publish(_r: Data, _c: Certificate, _s: Transaction) {
+    True
   }
 
   else(_) {
