@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { useWallet } from '@meshsdk/react';
-import { resolveTxHash } from '@meshsdk/core';
+import { useWallet } from '@/hooks/use-wallet';
+import { resolveTxHash } from '@/lib/utils/tx-hash';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { CopyButton } from '@/components/ui/copy-button';
@@ -118,7 +118,7 @@ export function KycBuildSignSubmitStep({
       const regResponse = await registerToken(regRequest, selectedVersion?.txHash);
       setTokenPolicyId(regResponse.policyId);
       setUnsignedCbor(regResponse.unsignedCborTx);
-      setDerivedTxHash(resolveTxHash(regResponse.unsignedCborTx));
+      setDerivedTxHash(await resolveTxHash(regResponse.unsignedCborTx));
 
       setStatus('preview');
       showToastRef.current({

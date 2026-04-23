@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from 'react';
-import { useWallet } from "@meshsdk/react";
+import { useWallet } from "@/hooks/use-wallet";
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -43,7 +43,7 @@ export function KycConfigStep({
   onComplete,
   onBack,
 }: StepComponentProps<KycConfigData>) {
-  const { wallet } = useWallet();
+  const { wallet, rawApi } = useWallet();
   const { toast: showToast } = useToast();
   const { selectedVersion } = useProtocolVersion();
 
@@ -70,9 +70,24 @@ export function KycConfigStep({
   const loadOwnVkey = useCallback(async () => {
     setIsLoadingVkey(true);
     try {
-      const usedAddresses = await wallet.getUsedAddresses();
-      const address = usedAddresses[0] ?? await wallet.getChangeAddress();
-      if (!address) {
+      // CIP-30 signData requires a hex address + hex payload, so use rawApi directly.
+      // (The wrapped `wallet` returns bech32 addresses for general use.)
+      const cip30 = rawApi as {
+        getUsedAddresses(): Promise<string[]>;
+        getChangeAddress(): Promise<string>;
+        signData(addr: string, payload: string): Promise<{ signature: string; key: string }>;
+      } | null;
+      if (!cip30) {
+        showToast({
+          title: 'Wallet not connected',
+          description: 'Connect a wallet before configuring KYC.',
+          variant: 'error',
+        });
+        return;
+      }
+      const usedHex = await cip30.getUsedAddresses();
+      const addressHex = usedHex[0] ?? (await cip30.getChangeAddress());
+      if (!addressHex) {
         showToast({
           title: 'No wallet address',
           description: 'Could not find a wallet address. Ensure your wallet is connected.',
@@ -80,9 +95,8 @@ export function KycConfigStep({
         });
         return;
       }
-      // BrowserWallet.signData(payload, address) — payload first, address second
-      // convertFromUTF8 defaults to true so a plain string works fine
-      const dataSignature = await wallet.signData('CIP113-GLOBAL-STATE-INIT', address);
+      const payloadHex = Buffer.from('CIP113-GLOBAL-STATE-INIT', 'utf-8').toString('hex');
+      const dataSignature = await cip30.signData(addressHex, payloadHex);
       const vkey = extractVkeyFromCoseKey(dataSignature.key);
       if (vkey) {
         setOwnVkey(vkey);
