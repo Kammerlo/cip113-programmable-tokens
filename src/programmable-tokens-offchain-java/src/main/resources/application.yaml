@@ -22,6 +22,9 @@ blockfrost:
   url: https://cardano-mainnet.blockfrost.io/api/v0/
   key: ""
 
+koios:
+  url: ${KOIOS_URL:https://api.koios.rest/api/v1/}
+
 store:
   cardano:
     host: backbone.mainnet.cardanofoundation.org
@@ -78,6 +81,9 @@ wallet:
 blockfrost:
   url: https://cardano-preprod.blockfrost.io/api/v0/
 
+koios:
+  url: ${KOIOS_URL:https://preprod.koios.rest/api/v1/}
+
 store:
   cardano:
     host: ""
@@ -101,6 +107,9 @@ wallet:
 
 blockfrost:
   url: https://cardano-preview.blockfrost.io/api/v0/
+
+koios:
+  url: ${KOIOS_URL:https://preview.koios.rest/api/v1/}
 
 store:
   cardano:

@@ -128,7 +128,11 @@ export function TransferModal({
 
       let unsignedCborTx: string;
 
-      if (transactionBuilder === "sdk") {
+      // KYC substandard is not yet implemented in @easy1staking/cip113-sdk-ts;
+      // route KYC tokens through the backend which has a full KYC handler.
+      const useSdk = transactionBuilder === "sdk" && !isKycToken;
+
+      if (useSdk) {
         // ----- Client-side tx building via CIP-113 SDK -----
         showToast({
           title: "Building Transaction",

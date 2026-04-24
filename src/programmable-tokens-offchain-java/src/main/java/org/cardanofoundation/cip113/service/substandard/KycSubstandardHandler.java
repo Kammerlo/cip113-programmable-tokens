@@ -272,7 +272,11 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     ))
                     .build();
 
-            var issuanceRedeemer = ConstrPlutusData.of(0, ConstrPlutusData.of(1, BytesPlutusData.of(substandardIssueContract.getScriptHash())));
+            // Registry node output is at index 2: [0] PLB, [1] updated covering node, [2] new registry node
+            var issuanceRedeemer = ConstrPlutusData.of(0,
+                    ConstrPlutusData.of(1, BytesPlutusData.of(substandardIssueContract.getScriptHash())),
+                    ConstrPlutusData.of(1, BigIntPlutusData.of(2)) // OutputIndex { index: 2 }
+            );
 
             var programmableToken = Asset.builder()
                     .name("0x" + request.getAssetName())
