@@ -52,9 +52,7 @@ public class CostModelOverlayProtocolParamsSupplier implements ProtocolParamsSup
                 params.getCostModels() == null ? new LinkedHashMap<>() : new LinkedHashMap<>(params.getCostModels());
         LinkedHashMap<String, Long> previous = merged.put(PLUTUS_V3, overlay);
         int prevSize = previous == null ? 0 : previous.size();
-        log.info("Overlayed PlutusV3 cost model: primary had {} entries, overlay has {} entries (sample first 5 values: {})",
-                prevSize, overlay.size(),
-                overlay.values().stream().limit(5).toList());
+        log.debug("Overlayed PlutusV3 cost model: primary had {} entries, overlay has {}", prevSize, overlay.size());
         params.setCostModels(merged);
         return params;
     }
@@ -72,7 +70,7 @@ public class CostModelOverlayProtocolParamsSupplier implements ProtocolParamsSup
                 return null;
             }
             int currentEpoch = latestBlock.getValue().getEpoch();
-            log.info("Overlay backend reports current epoch (from latest block): {}", currentEpoch);
+            log.debug("Overlay backend reports current epoch (from latest block): {}", currentEpoch);
             var params = overlayBackend.getEpochService().getProtocolParameters(currentEpoch);
             if (!params.isSuccessful() || params.getValue() == null) {
                 log.warn("Failed to fetch protocol params for epoch {} from overlay backend: {}",
