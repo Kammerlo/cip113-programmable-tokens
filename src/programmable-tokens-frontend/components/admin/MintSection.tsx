@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useWallet } from "@meshsdk/react";
+import { useWallet } from "@/hooks/use-wallet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TxBuilderToggle, type TransactionBuilder } from "@/components/ui/tx-builder-toggle";
 import {
   Coins,
   CheckCircle,
@@ -12,9 +13,11 @@ import {
 } from "lucide-react";
 import { AdminTokenSelector } from "./AdminTokenSelector";
 import { AdminTokenInfo } from "@/lib/api/admin";
+import { decodeAssetNameDisplay } from "@/lib/utils/cip68";
 import { mintToken } from "@/lib/api";
 import { MintTokenRequest, Cip170AttestationData } from "@/types/api";
 import { useProtocolVersion } from "@/contexts/protocol-version-context";
+import { useCIP113 } from "@/contexts/cip113-context";
 import { useToast } from "@/components/ui/use-toast";
 import { getExplorerTxUrl } from "@/lib/utils";
 import {
@@ -42,6 +45,8 @@ export function MintSection({ tokens, feePayerAddress }: MintSectionProps) {
   const { wallet } = useWallet();
   const { toast: showToast } = useToast();
   const { selectedVersion } = useProtocolVersion();
+  const { getProtocol, ensureSubstandard, available: sdkAvailable } = useCIP113();
+  const [txBuilder, setTxBuilder] = useState<TransactionBuilder>(sdkAvailable ? "sdk" : "backend");
 
   // Filter tokens where user has ISSUER_ADMIN role or is a dummy token
   const mintableTokens = tokens.filter(
@@ -131,16 +136,31 @@ export function MintSection({ tokens, feePayerAddress }: MintSectionProps) {
       setIsBuilding(true);
       setStep("signing");
 
-      const request: MintTokenRequest = {
-        feePayerAddress,
-        tokenPolicyId: selectedToken.policyId,
-        assetName: selectedToken.assetName,
-        quantity,
-        recipientAddress: recipientAddress.trim(),
-        ...(attestation ? { attestation } : {}),
-      };
+      let unsignedCborTx: string;
 
-      const unsignedCborTx = await mintToken(request, selectedVersion?.txHash);
+      if (txBuilder === "sdk") {
+        const substandardId = await ensureSubstandard(selectedToken.policyId, selectedToken.assetName);
+        const protocol = await getProtocol();
+        const result = await protocol.mint({
+          feePayerAddress,
+          tokenPolicyId: selectedToken.policyId,
+          assetName: selectedToken.assetName,
+          quantity: BigInt(quantity),
+          recipientAddress: recipientAddress.trim(),
+          substandardId,
+        });
+        unsignedCborTx = result.cbor;
+      } else {
+        const request: MintTokenRequest = {
+          feePayerAddress,
+          tokenPolicyId: selectedToken.policyId,
+          assetName: selectedToken.assetName,
+          quantity,
+          recipientAddress: recipientAddress.trim(),
+          ...(attestation ? { attestation } : {}),
+        };
+        unsignedCborTx = await mintToken(request, selectedVersion?.txHash);
+      }
 
       setIsBuilding(false);
       setIsSigning(true);
@@ -153,7 +173,7 @@ export function MintSection({ tokens, feePayerAddress }: MintSectionProps) {
 
       showToast({
         title: "Mint Successful",
-        description: `Minted ${quantity} ${selectedToken.assetNameDisplay} tokens`,
+        description: `Minted ${quantity} ${decodeAssetNameDisplay(selectedToken.assetName)} tokens`,
         variant: "success",
       });
     } catch (error) {
@@ -270,7 +290,8 @@ export function MintSection({ tokens, feePayerAddress }: MintSectionProps) {
           Mint Complete!
         </h3>
         <p className="text-sm text-dark-400 text-center mb-4">
-          Successfully minted {quantity} {selectedToken?.assetNameDisplay}{" "}
+          Successfully minted {quantity}{" "}
+          {selectedToken ? decodeAssetNameDisplay(selectedToken.assetName) : ""}{" "}
           tokens
         </p>
 
@@ -396,6 +417,8 @@ export function MintSection({ tokens, feePayerAddress }: MintSectionProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      <TxBuilderToggle value={txBuilder} onChange={setTxBuilder} sdkAvailable={sdkAvailable} />
+
       {/* Token Selector */}
       <div>
         <AdminTokenSelector

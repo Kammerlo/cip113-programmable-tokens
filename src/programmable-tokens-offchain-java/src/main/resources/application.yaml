@@ -22,6 +22,9 @@ blockfrost:
   url: https://cardano-mainnet.blockfrost.io/api/v0/
   key: ""
 
+koios:
+  url: ${KOIOS_URL:https://api.koios.rest/api/v1/}
+
 store:
   cardano:
     host: backbone.mainnet.cardanofoundation.org
@@ -78,6 +81,9 @@ wallet:
 blockfrost:
   url: https://cardano-preprod.blockfrost.io/api/v0/
 
+koios:
+  url: ${KOIOS_URL:https://preprod.koios.rest/api/v1/}
+
 store:
   cardano:
     host: ""
@@ -97,15 +103,18 @@ network: preview
 wallet:
   mnemonic: ""
 
-programmable.token.default.txHash: "114adc8ee212b5ded1f895ab53c7741e5521feff735d05aeef2a92dcf05c9ae2"
+# programmable.token.default.txHash: "7fab961bbf52d95c475b3ff8b994dcc9334ef3fb4d752b875c0d426eeb391cc8"
 
 blockfrost:
   url: https://cardano-preview.blockfrost.io/api/v0/
+
+koios:
+  url: ${KOIOS_URL:https://preview.koios.rest/api/v1/}
 
 store:
   cardano:
     host: ""
     port: 0
     protocol-magic: 2
-    sync-start-blockhash: c196c1915bf07235284131d5f84b395061477285d74aba8634a82b5c2b22ed2f
-    sync-start-slot: 69599150
+    sync-start-blockhash: ""
+    sync-start-slot: 0
