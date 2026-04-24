@@ -676,8 +676,15 @@ public class KeriController {
         }
 
         try {
-            // Build payload and compute SAID
+            // Build payload and compute SAID.
+            // CRITICAL: signify-java's createExchangeMessage (Exchanging.java:228) does
+            // `attrs.put("i", recipient); attrs.putAll(payload)` BEFORE the wire send. If we
+            // omit `i` from the payload here, our pre-computed SAID is for {d, unit, quantity}
+            // but the SAID Veridian recomputes is for {i, d, unit, quantity} → mismatch →
+            // wallet's processRemoteSignReq calls markNotification and silently drops the
+            // request without surfacing UI. Inserting `i` first ourselves keeps the SAIDs in sync.
             Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("i", userAid);
             payload.put("d", "");
             payload.put("unit", request.unit());
             payload.put("quantity", request.quantity());
@@ -698,26 +705,39 @@ public class KeriController {
 
             log.info("Remotesign ixn request sent to wallet AID={}, digest={}", userAid, digest);
 
-            // Wait for the wallet to respond on /remotesign/ixn/ref
+            // Wait for the wallet to respond on /remotesign/ixn/ref. KERIA prefixes inbound
+            // exn routes with "/exn/" when surfacing them as notifications, so we have to
+            // accept both "/remotesign/ixn/ref" and "/exn/remotesign/ixn/ref".
             IpexNotificationHelper.Notification refNote =
-                    IpexNotificationHelper.waitForNotification(client, "/remotesign/ixn/ref");
+                    IpexNotificationHelper.waitForNotification(client,
+                            "/remotesign/ixn/ref", "/exn/remotesign/ixn/ref");
             IpexNotificationHelper.markAndDelete(client, refNote);
 
-            // Query user's key state to get current sequence number after interact
-            Object keyStateResult = client.keyStates().query(identifierName, userAid);
-            client.operations().wait(Operation.fromObject(keyStateResult));
-
-            @SuppressWarnings("unchecked")
-            Optional<Object> keyStateOpt = client.keyStates().get(userAid);
-            if (keyStateOpt.isEmpty()) {
-                return ResponseEntity.internalServerError().body(
-                        Map.of("error", "Could not retrieve key state for AID: " + userAid));
+            // Query user's key state to get the new sequence number after the interact event.
+            // signify-java's query signature is (pre, sn) — the second arg is an OPTIONAL hex
+            // sequence-number string; passing the AID there makes KERIA do `int(aid, 16)` and
+            // crash. Use null for "latest state". Also, KERIA's /states?pre=X returns a LIST
+            // of key-state dicts — coerceKeyState handles both list and bare-map shapes.
+            String seqNumber = "<unknown>";
+            Thread.sleep(2000); // let the new ixn settle in KERIA before querying
+            for (int attempt = 1; attempt <= 5; attempt++) {
+                try {
+                    Object queryOp = client.keyStates().query(userAid, null);
+                    client.operations().wait(Operation.fromObject(queryOp));
+                    Optional<Object> raw = client.keyStates().get(userAid);
+                    if (raw.isPresent()) {
+                        Map<String, Object> ks = coerceKeyState(raw.get());
+                        if (ks != null && ks.get("s") != null) {
+                            seqNumber = ks.get("s").toString();
+                            break;
+                        }
+                    }
+                    log.info("Key state for {} not available yet (attempt {}/5)", userAid, attempt);
+                } catch (Exception ex) {
+                    log.warn("keyStates query attempt {}/5 failed: {} — retrying", attempt, ex.toString());
+                }
+                Thread.sleep(3000);
             }
-
-            // Extract sequence number from key state
-            @SuppressWarnings("unchecked")
-            Map<String, Object> keyState = (Map<String, Object>) keyStateOpt.get();
-            String seqNumber = keyState.get("s").toString();
 
             var attestation = new Cip170AttestationData(userAid, digest, seqNumber, "1.0");
             log.info("CIP-170 attestation anchored: signer={}, digest={}, seq={}",
@@ -803,5 +823,21 @@ public class KeriController {
         return client.exchanges().createExchangeMessage(
                 hab, "/ipex/grant", data, embeds,
                 args.getRecipient(), args.getDatetime(), args.getAgreeSaid());
+    }
+
+    /**
+     * KERIA's /states?pre=X returns a LIST of key-state dicts. Some signify-java
+     * versions / single-result paths return a bare map. Handle both.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> coerceKeyState(Object raw) {
+        if (raw instanceof Map) return (Map<String, Object>) raw;
+        if (raw instanceof List) {
+            List<Object> list = (List<Object>) raw;
+            if (!list.isEmpty() && list.get(0) instanceof Map) {
+                return (Map<String, Object>) list.get(0);
+            }
+        }
+        return null;
     }
 }

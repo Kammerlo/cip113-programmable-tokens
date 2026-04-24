@@ -14,6 +14,12 @@ import {
   resolveOobi,
   storeCardanoAddress,
   requestAttestation,
+  presentCredential,
+  cancelPresentation,
+  getAvailableRoles,
+  getSession,
+  type AvailableRole,
+  type CredentialResponse,
 } from '@/lib/api/keri';
 import { getPaymentKeyHash } from '@/lib/utils/address';
 import { getExplorerTxUrl } from '@/lib/utils/format';
@@ -90,8 +96,35 @@ export function KycBuildSignSubmitStep({
   const [isOobiConnected, setIsOobiConnected] = useState(!!cip170SessionId);
   const [connectError, setConnectError] = useState<string | null>(null);
 
+  // Credential presentation state — required before attestation can be anchored
+  const [hasCredential, setHasCredential] = useState(false);
+  const [availableRoles, setAvailableRoles] = useState<AvailableRole[] | null>(null);
+  const [selectedRole, setSelectedRole] = useState<string | null>(null);
+  const [credential, setCredential] = useState<CredentialResponse | null>(null);
+  const [isPresenting, setIsPresenting] = useState(false);
+  const [presentError, setPresentError] = useState<string | null>(null);
+
   // Effective session ID: from AUTH_BEGIN or from inline OOBI connect
   const effectiveSessionId = cip170SessionId || attestSessionId;
+
+  // If step 1 saved a session, probe it to see whether a credential is already admitted —
+  // if so we can skip OOBI + presentation and go straight to attestation.
+  useEffect(() => {
+    if (!cip170SessionId) return;
+    let cancelled = false;
+    getSession(cip170SessionId)
+      .then((s) => {
+        if (cancelled) return;
+        if (s.hasCredential) {
+          setHasCredential(true);
+        }
+      })
+      .catch(() => {
+        // Best-effort: if session probe fails, leave hasCredential false and let
+        // the user run the inline credential presentation below.
+      });
+    return () => { cancelled = true; };
+  }, [cip170SessionId]);
 
   // ---- BUILD ----
   const handleBuild = useCallback(async () => {
@@ -199,10 +232,12 @@ export function KycBuildSignSubmitStep({
       if (addresses?.[0]) {
         await storeCardanoAddress(attestSessionId, addresses[0]);
       }
+      const rolesData = await getAvailableRoles(attestSessionId);
+      setAvailableRoles(rolesData.availableRoles);
       setIsOobiConnected(true);
       showToastRef.current({
         title: 'Connected',
-        description: 'OOBI resolved. You can now anchor the attestation.',
+        description: 'OOBI resolved. Present a credential to continue.',
         variant: 'success',
       });
     } catch {
@@ -211,6 +246,46 @@ export function KycBuildSignSubmitStep({
       setIsConnecting(false);
     }
   }, [partnerOobi, attestSessionId, wallet]);
+
+  // ---- CREDENTIAL PRESENTATION (only needed when step 1 was skipped) ----
+  const loadAvailableRoles = useCallback(async () => {
+    if (!effectiveSessionId) return;
+    try {
+      const rolesData = await getAvailableRoles(effectiveSessionId);
+      setAvailableRoles(rolesData.availableRoles);
+    } catch (err) {
+      setPresentError(err instanceof Error ? err.message : 'Failed to load roles');
+    }
+  }, [effectiveSessionId]);
+
+  const handlePresentCredential = useCallback(async () => {
+    if (!effectiveSessionId || !selectedRole) return;
+    try {
+      setIsPresenting(true);
+      setPresentError(null);
+      const cred = await presentCredential(effectiveSessionId, selectedRole);
+      setCredential(cred);
+      setHasCredential(true);
+      showToastRef.current({
+        title: 'Credential Verified',
+        description: `${cred.label} credential admitted.`,
+        variant: 'success',
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to present credential';
+      if (msg.includes('409')) setPresentError('Presentation was cancelled.');
+      else if (msg.includes('408')) setPresentError('Timed out waiting for credential. Please try again.');
+      else setPresentError(msg);
+    } finally {
+      setIsPresenting(false);
+    }
+  }, [effectiveSessionId, selectedRole]);
+
+  const handleCancelPresent = useCallback(() => {
+    if (!effectiveSessionId) return;
+    cancelPresentation(effectiveSessionId).catch(() => {});
+    setIsPresenting(false);
+  }, [effectiveSessionId]);
 
   // ---- ATTESTATION ----
   const handleAttestation = useCallback(async () => {
@@ -472,10 +547,42 @@ export function KycBuildSignSubmitStep({
 
             {enableAttestation && !attestationData && (
               <div className="mt-4 space-y-3">
+                {/* Step indicator — mirrors the four phases of the CLI script so the
+                    user can see exactly where they are in the KERI handshake. */}
+                <div className="flex flex-col gap-1.5">
+                  {[
+                    ["Connect Veridian wallet (mutual OOBI)",   isOobiConnected],
+                    ["Present a verifiable credential",          hasCredential],
+                    ["Anchor registration digest in your KEL",   !!attestationData],
+                    ["Submit the registration transaction",      false],
+                  ].map(([label, done], idx) => {
+                    const active = !done && (idx === 0 || (idx === 1 && isOobiConnected) || (idx === 2 && hasCredential) || (idx === 3 && !!attestationData));
+                    return (
+                      <div key={idx} className={`flex items-center gap-2 text-xs ${
+                        done ? 'text-green-400' : active ? 'text-primary-400' : 'text-dark-500'
+                      }`}>
+                        <span className={`w-5 h-5 rounded-full border flex items-center justify-center ${
+                          done ? 'border-green-500 bg-green-500/10'
+                            : active ? 'border-primary-500 bg-primary-500/10'
+                              : 'border-dark-700'
+                        }`}>{done ? '✓' : (idx + 1)}</span>
+                        <span>{String(label)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
                 {(connectError || attestError) && (
                   <div className="px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-lg">
                     <p className="text-sm text-red-400">{connectError || attestError}</p>
                   </div>
+                )}
+
+                {isAttesting && hasCredential && (
+                  <p className="text-xs text-dark-400">
+                    👉 Open the Veridian app, look for an incoming remote-sign request, and tap
+                    Approve. The backend is polling KEL — this can take up to 5 minutes.
+                  </p>
                 )}
 
                 {/* Step 1: OOBI connect (only when no session from AUTH_BEGIN) */}
@@ -538,17 +645,94 @@ export function KycBuildSignSubmitStep({
                   </div>
                 )}
 
-                {/* Step 4: Anchor attestation (session ready) */}
-                {isOobiConnected && (
-                  <Button
-                    variant="primary"
-                    className="w-full"
-                    onClick={handleAttestation}
-                    isLoading={isAttesting}
-                    disabled={isAttesting}
-                  >
-                    {isAttesting ? 'Waiting for wallet...' : 'Anchor Digest & Attest'}
-                  </Button>
+                {/* Step 4: Present a credential if we don't already have one in the session */}
+                {isOobiConnected && !hasCredential && (
+                  <div className="space-y-3">
+                    {presentError && (
+                      <div className="px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                        <p className="text-sm text-red-400">{presentError}</p>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-dark-400">
+                      Select a role and present the matching credential from your Veridian wallet.
+                    </p>
+
+                    {!availableRoles && (
+                      <Button
+                        variant="outline"
+                        className="w-full text-xs h-7"
+                        onClick={loadAvailableRoles}
+                      >
+                        Load available roles
+                      </Button>
+                    )}
+
+                    {availableRoles && availableRoles.length > 0 && (
+                      <div className="space-y-2">
+                        {availableRoles.map((r) => (
+                          <button
+                            key={r.role}
+                            type="button"
+                            onClick={() => setSelectedRole(r.role)}
+                            disabled={isPresenting}
+                            className={`w-full px-4 py-3 rounded-lg border text-left transition-colors ${
+                              selectedRole === r.role
+                                ? 'border-primary-500 bg-primary-500/10 text-white'
+                                : 'border-dark-700 bg-dark-800 text-dark-300 hover:border-dark-600'
+                            }`}
+                          >
+                            <span className="font-medium">{r.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {availableRoles && availableRoles.length === 0 && (
+                      <p className="text-xs text-yellow-400">
+                        No issuable roles configured on the backend.
+                      </p>
+                    )}
+
+                    <Button
+                      variant="primary"
+                      className="w-full"
+                      onClick={handlePresentCredential}
+                      isLoading={isPresenting}
+                      disabled={!selectedRole || isPresenting}
+                    >
+                      {isPresenting ? 'Waiting for wallet...' : 'Request Credential Presentation'}
+                    </Button>
+
+                    {isPresenting && (
+                      <Button variant="ghost" className="w-full" onClick={handleCancelPresent}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                {/* Step 5: Anchor attestation (session ready + credential admitted) */}
+                {isOobiConnected && hasCredential && (
+                  <>
+                    {credential && (
+                      <div className="px-4 py-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Shield className="h-4 w-4 text-green-400" />
+                          <span className="text-sm text-green-400 font-medium">{credential.label} verified</span>
+                        </div>
+                      </div>
+                    )}
+                    <Button
+                      variant="primary"
+                      className="w-full"
+                      onClick={handleAttestation}
+                      isLoading={isAttesting}
+                      disabled={isAttesting}
+                    >
+                      {isAttesting ? 'Waiting for wallet...' : 'Anchor Digest & Attest'}
+                    </Button>
+                  </>
                 )}
               </div>
             )}

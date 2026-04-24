@@ -133,9 +133,32 @@ export function GlobalStateSection({
     e.preventDefault();
     if (!selectedToken || !globalState) return;
 
-    // Determine which changes need to be submitted
-    // On-chain validator only allows ONE action per tx, so submit sequentially
+    // Determine which changes need to be submitted.
+    // The on-chain validator allows only ONE action per tx, so we submit sequentially.
+    // ORDER MATTERS: MODIFY_SECURITY_INFO is the only action whose validator allows the
+    // global-state UTxO's lovelace to change (via the `without_lovelace` equality check).
+    // The other actions require exact value preservation, so any datum growth (e.g. a new
+    // trusted entity) can push the output past the on-chain min-utxo and cause Ogmios to
+    // reject submission. Running security info first lets the backend top up the UTxO's
+    // lovelace before we attempt the strict-equality actions.
     const changes: Array<{ label: string; action: () => Promise<string> }> = [];
+
+    if (securityChanged) {
+      changes.push({
+        label: "Updating security info",
+        action: async () => {
+          const response = await updateGlobalState(
+            { adminAddress, policyId: selectedToken.policyId, action: "MODIFY_SECURITY_INFO" as GlobalStateAction, securityInfo: securityInfo || undefined },
+            selectedVersion?.txHash
+          );
+          if (!response.isSuccessful || !response.unsignedCborTx) {
+            throw new Error(response.error || "Failed to build security info tx");
+          }
+          const signedTx = await wallet.signTx(response.unsignedCborTx, true);
+          return wallet.submitTx(signedTx);
+        },
+      });
+    }
 
     if (entitiesChanged) {
       changes.push({
@@ -181,23 +204,6 @@ export function GlobalStateSection({
           );
           if (!response.isSuccessful || !response.unsignedCborTx) {
             throw new Error(response.error || "Failed to build mintable amount tx");
-          }
-          const signedTx = await wallet.signTx(response.unsignedCborTx, true);
-          return wallet.submitTx(signedTx);
-        },
-      });
-    }
-
-    if (securityChanged) {
-      changes.push({
-        label: "Updating security info",
-        action: async () => {
-          const response = await updateGlobalState(
-            { adminAddress, policyId: selectedToken.policyId, action: "MODIFY_SECURITY_INFO" as GlobalStateAction, securityInfo: securityInfo || undefined },
-            selectedVersion?.txHash
-          );
-          if (!response.isSuccessful || !response.unsignedCborTx) {
-            throw new Error(response.error || "Failed to build security info tx");
           }
           const signedTx = await wallet.signTx(response.unsignedCborTx, true);
           return wallet.submitTx(signedTx);

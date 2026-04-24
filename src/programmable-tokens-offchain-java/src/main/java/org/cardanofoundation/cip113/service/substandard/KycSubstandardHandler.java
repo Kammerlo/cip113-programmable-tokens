@@ -41,6 +41,7 @@ import org.cardanofoundation.cip113.service.*;
 import org.cardanofoundation.cip113.service.substandard.capabilities.BasicOperations;
 import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable;
 import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.AddTrustedEntityRequest;
+import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateAction;
 import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateInitRequest;
 import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.GlobalStateInitResult;
 import org.cardanofoundation.cip113.service.substandard.capabilities.GlobalStateManageable.RemoveTrustedEntityRequest;
@@ -426,7 +427,36 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
 
             var issuanceContract = protocolScriptBuilderService.getParameterizedIssuanceMintScript(protocolParams, substandardIssueContract);
 
-            var issuanceRedeemer = ConstrPlutusData.of(0, ConstrPlutusData.of(1, BytesPlutusData.of(substandardIssueContract.getScriptHash())));
+            // Subsequent mint (registry node already exists): include the registry node UTxO as a
+            // reference input so issuance_mint.ak can verify the token via RefInput. The redeemer
+            // is SmartTokenMintingAction { minting_logic_cred, minting_registry_proof: RefInput }.
+            // Without the second field, evaluation fails with EmptyList(...) because the validator
+            // tries to read `redeemer.minting_registry_proof` from a 1-element constr.
+            var registrySpendContract = protocolScriptBuilderService.getParameterizedDirectorySpendScript(protocolParams);
+            var registryAddress = AddressProvider.getEntAddress(registrySpendContract, network.getCardanoNetwork());
+            var registryEntries = utxoProvider.findUtxos(registryAddress.getAddress());
+            final var progTokenPolicyId = issuanceContract.getPolicyId();
+            var progTokenRegistryOpt = registryEntries.stream()
+                    .filter(utxo -> registryNodeParser.parse(utxo.getInlineDatum())
+                            .map(registryDatum -> registryDatum.key().equals(progTokenPolicyId)).orElse(false))
+                    .findAny();
+            if (progTokenRegistryOpt.isEmpty()) {
+                return TransactionContext.typedError("could not find registry entry for token");
+            }
+            var progTokenRegistry = progTokenRegistryOpt.get();
+            var registryRefInput = TransactionInput.builder()
+                    .transactionId(progTokenRegistry.getTxHash())
+                    .index(progTokenRegistry.getOutputIndex())
+                    .build();
+            var sortedReferenceInputs = Stream.of(registryRefInput)
+                    .sorted(new TransactionInputComparator())
+                    .toList();
+            var registryRefInputIndex = sortedReferenceInputs.indexOf(registryRefInput);
+
+            var issuanceRedeemer = ConstrPlutusData.of(0,
+                    ConstrPlutusData.of(1, BytesPlutusData.of(substandardIssueContract.getScriptHash())),
+                    ConstrPlutusData.of(0, BigIntPlutusData.of(registryRefInputIndex)) // RefInput { index }
+            );
 
             var programmableToken = Asset.builder()
                     .name("0x" + request.assetName())
@@ -456,6 +486,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     .withdraw(substandardIssueAddress.getAddress(), BigInteger.ZERO, ConstrPlutusData.of(0))
                     .mintAsset(issuanceContract, programmableToken, issuanceRedeemer)
                     .payToContract(targetAddress.getAddress(), ValueUtil.toAmountList(programmableTokenValue), ConstrPlutusData.of(0))
+                    .readFrom(registryRefInput)
                     .attachRewardValidator(substandardIssueContract)
                     .withChangeAddress(request.feePayerAddress());
 
@@ -796,8 +827,13 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     .value(BigInteger.ONE)
                     .build();
 
+            // Allocate generous lovelace headroom so future updates that grow the datum
+            // (e.g. adding trusted entities) don't blow past the on-chain min-utxo. The
+            // validator forbids changing lovelace for ModifyTrustedEntities/UpdateMintableAmount/
+            // PauseTransfers (`global_state.ak:138`), so the input UTxO must already cover the
+            // largest expected datum. ~5 ADA covers ~50 vkey additions.
             Value globalStateValue = Value.builder()
-                    .coin(Amount.ada(1).getQuantity())
+                    .coin(Amount.ada(5).getQuantity())
                     .multiAssets(List.of(
                             MultiAsset.builder()
                                     .policyId(globalStateMintScript.getPolicyId())
@@ -953,6 +989,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     .mergeOutputs(false)
                     .preBalanceTx((txBuilderContext, transaction1) -> {
                         ensureGlobalStateOutputFirst(transaction1, request.adminAddress());
+                        restoreGlobalStateOutputValue(transaction1, scriptAddr, inputValue);
                     })
                     .postBalanceTx((txBuilderContext, transaction1) -> {
                         restoreGlobalStateOutputValue(transaction1, scriptAddr, inputValue);
@@ -1045,6 +1082,7 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     .mergeOutputs(false)
                     .preBalanceTx((txBuilderContext, transaction1) -> {
                         ensureGlobalStateOutputFirst(transaction1, request.adminAddress());
+                        restoreGlobalStateOutputValue(transaction1, scriptAddr, inputValue);
                     })
                     .postBalanceTx((txBuilderContext, transaction1) -> {
                         restoreGlobalStateOutputValue(transaction1, scriptAddr, inputValue);
@@ -1140,11 +1178,22 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
             var inputValue = globalStateUtxo.toValue();
             var scriptAddr = globalStateSpendAddress.getAddress();
 
+            // ModifySecurityInfo is the only action whose validator allows the lovelace to
+            // change (`without_lovelace` check at global_state.ak:118-119). All other actions
+            // require `output.value == input.value` exactly. We use ModifySecurityInfo as the
+            // top-up channel: when invoked we pad the output to a generous lovelace target so
+            // the global state UTxO has headroom for subsequent datum-growing updates.
+            final long topUpTargetLovelace = Amount.ada(5).getQuantity().longValue();
+            final boolean isTopUpAction = request.action() == GlobalStateAction.MODIFY_SECURITY_INFO;
+            final Value outputValueAtEval = isTopUpAction
+                    ? bumpLovelace(inputValue, topUpTargetLovelace)
+                    : inputValue;
+
             var tx = new Tx()
                     .collectFrom(adminUtxos)
                     .collectFrom(globalStateUtxo, spendRedeemer)
                     .payToContract(scriptAddr,
-                            globalStateUtxo.getAmount(), updatedDatum)
+                            ValueUtil.toAmountList(outputValueAtEval), updatedDatum)
                     .attachSpendingValidator(globalStateSpendScript)
                     .withChangeAddress(request.adminAddress());
 
@@ -1158,9 +1207,13 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
                     .mergeOutputs(false)
                     .preBalanceTx((txBuilderContext, transaction1) -> {
                         ensureGlobalStateOutputFirst(transaction1, request.adminAddress());
+                        // Restore BEFORE script-cost eval too. The validator's value-equality
+                        // check runs at eval time (before balance + before postBalanceTx in
+                        // QuickTxBuilder 0.8.0-pre3), so post-only restoration is too late.
+                        restoreGlobalStateOutputValue(transaction1, scriptAddr, outputValueAtEval);
                     })
                     .postBalanceTx((txBuilderContext, transaction1) -> {
-                        restoreGlobalStateOutputValue(transaction1, scriptAddr, inputValue);
+                        restoreGlobalStateOutputValue(transaction1, scriptAddr, outputValueAtEval);
                     })
                     .build();
 
@@ -1317,10 +1370,26 @@ public class KycSubstandardHandler implements SubstandardHandler, BasicOperation
     }
 
     /**
-     * Restore the global state output's value to exactly match the input UTxO.
-     * The on-chain validator requires own_input.output.value == global_state_output.value (exact match).
-     * The QuickTxBuilder may adjust lovelace during balancing to meet min-UTxO requirements,
-     * which would cause the validator to reject the tx. This method corrects the value post-balance.
+     * Return a Value with at least {@code targetLovelace} lovelace, preserving multi-assets.
+     * Used by ModifySecurityInfo to top up the global state UTxO when the existing lovelace
+     * is below the headroom needed for future datum-growing updates.
+     */
+    private Value bumpLovelace(Value source, long targetLovelace) {
+        var current = source.getCoin() == null ? BigInteger.ZERO : source.getCoin();
+        var target = BigInteger.valueOf(targetLovelace);
+        var coin = current.compareTo(target) >= 0 ? current : target;
+        return Value.builder()
+                .coin(coin)
+                .multiAssets(source.getMultiAssets())
+                .build();
+    }
+
+    /**
+     * Restore the global state output's value to exactly match the desired value.
+     * The on-chain validator requires own_input.output.value == global_state_output.value (exact match)
+     * for most actions; ModifySecurityInfo allows lovelace differences but requires multi-assets to match.
+     * QuickTxBuilder may adjust lovelace during balancing to meet min-UTxO requirements,
+     * which would cause the validator to reject the tx. This method enforces the desired value.
      */
     private void restoreGlobalStateOutputValue(Transaction transaction, String scriptAddress, Value inputValue) {
         var outputs = transaction.getBody().getOutputs();

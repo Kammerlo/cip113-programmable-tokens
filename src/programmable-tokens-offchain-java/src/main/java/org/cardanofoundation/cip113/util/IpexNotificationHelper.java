@@ -7,7 +7,6 @@ import org.cardanofoundation.signify.app.clienting.SignifyClient;
 import org.cardanofoundation.signify.cesr.util.Utils;
 
 import java.util.List;
-import java.util.Objects;
 
 @Slf4j
 public class IpexNotificationHelper {
@@ -16,23 +15,33 @@ public class IpexNotificationHelper {
     private static final long POLL_INTERVAL_MS = 2000;
 
     public static Notification waitForNotification(SignifyClient client, String route) throws Exception {
+        return waitForNotification(client, route, route.startsWith("/exn/") ? route.substring(4) : "/exn" + route);
+    }
+
+    /**
+     * Wait for any notification whose body's r field matches one of the accepted routes.
+     * KERIA prefixes inbound exn routes with "/exn/" when surfacing them as notifications,
+     * so we typically pass both the bare route and the /exn/-prefixed variant.
+     */
+    public static Notification waitForNotification(SignifyClient client, String... acceptedRoutes) throws Exception {
+        var accepted = List.of(acceptedRoutes);
         for (int i = 0; i < MAX_RETRIES; i++) {
             Notifying.Notifications.NotificationListResponse response = client.notifications().list();
             List<Notification> notes = Utils.fromJson(response.notes(), new TypeReference<>() {});
 
-            List<Notification> matching = notes.stream()
-                    .filter(n -> Objects.equals(route, n.a.r) && !Boolean.TRUE.equals(n.r))
-                    .toList();
+            var matching = notes.stream()
+                    .filter(n -> n.a != null && accepted.contains(n.a.r) && !Boolean.TRUE.equals(n.r))
+                    .findFirst();
 
-            if (!matching.isEmpty()) {
-                log.debug("Received notification for route={}", route);
-                return matching.getFirst();
+            if (matching.isPresent()) {
+                log.debug("Received notification for route={}", matching.get().a.r);
+                return matching.get();
             }
 
-            log.info("Waiting for notification: {} (attempt {}/{})", route, i + 1, MAX_RETRIES);
+            log.info("Waiting for notification: {} (attempt {}/{})", accepted, i + 1, MAX_RETRIES);
             Thread.sleep(POLL_INTERVAL_MS);
         }
-        throw new RuntimeException("Timed out waiting for notification: " + route);
+        throw new RuntimeException("Timed out waiting for notification: " + accepted);
     }
 
     public static void markAndDelete(SignifyClient client, Notification note) throws Exception {

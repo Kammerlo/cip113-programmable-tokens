@@ -36,8 +36,10 @@ public class YaciConfiguration {
     public ProtocolParamsSupplier protocolParamsSupplier(BFBackendService bfBackendService,
                                                          KoiosBackendService koiosBackendService) {
         var primary = new DefaultProtocolParamsSupplier(bfBackendService.getEpochService());
-        var costModelSource = new DefaultProtocolParamsSupplier(koiosBackendService.getEpochService());
-        return new CostModelOverlayProtocolParamsSupplier(primary, costModelSource);
+        // Pass Koios as a full BackendService so the overlay can look up the CURRENT epoch
+        // (Koios's no-arg /epoch_params returns a stale finalized epoch on preview, which on
+        // 2026-04-17 caused PPViewHashesDontMatch — see CostModelOverlayProtocolParamsSupplier).
+        return new CostModelOverlayProtocolParamsSupplier(primary, koiosBackendService);
     }
 
     //    @Bean
