@@ -14,6 +14,7 @@ import {
   storeCardanoAddress,
   getAvailableRoles,
   publishCredentialChain,
+  issueCredential,
   type CredentialResponse,
   type AvailableRole,
 } from '@/lib/api/keri';
@@ -59,6 +60,10 @@ export function KycCip170Step({
   const [availableRoles, setAvailableRoles] = useState<AvailableRole[] | null>(null);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [credential, setCredential] = useState<CredentialResponse | null>(null);
+  const [credentialMode, setCredentialMode] = useState<'present' | 'issue'>('present');
+  const [issueFirstName, setIssueFirstName] = useState('');
+  const [issueLastName, setIssueLastName] = useState('');
+  const [issueEmail, setIssueEmail] = useState('');
 
   // Publish state
   const [authBeginTxHash, setAuthBeginTxHash] = useState<string | null>(null);
@@ -124,6 +129,25 @@ export function KycCip170Step({
       } else {
         setError('Failed to present credential');
       }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ── Credential issuance ─────────────────────────────────────────────────
+  const handleIssueCredential = async () => {
+    if (!issueFirstName.trim() || !issueLastName.trim() || !issueEmail.trim()) return;
+    try {
+      setIsLoading(true);
+      setError(null);
+      const cred = await issueCredential(sessionIdRef.current, {
+        firstName: issueFirstName.trim(),
+        lastName: issueLastName.trim(),
+        email: issueEmail.trim(),
+      });
+      setCredential(cred);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to issue credential');
     } finally {
       setIsLoading(false);
     }
@@ -303,52 +327,130 @@ export function KycCip170Step({
         </Card>
       )}
 
-      {/* Step 3: Present Credential */}
+      {/* Step 3: Present or Issue Credential */}
       {subStep === 'credential' && (
         <Card className="p-4 space-y-4">
           <div className="flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary-400" />
-            <h4 className="text-white font-medium">Present Credential</h4>
+            <h4 className="text-white font-medium">
+              {credentialMode === 'present' ? 'Present Credential' : 'Issue Credential'}
+            </h4>
           </div>
 
           {!credential ? (
             <>
-              <p className="text-sm text-dark-400">
-                Select a role and present your credential from your Veridian wallet.
-              </p>
+              <div className="grid grid-cols-2 gap-2 p-1 bg-dark-900 rounded-lg">
+                <button
+                  onClick={() => { setCredentialMode('present'); setError(null); }}
+                  disabled={isLoading}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    credentialMode === 'present'
+                      ? 'bg-primary-500/20 text-primary-300 border border-primary-500/40'
+                      : 'text-dark-400 hover:text-dark-200'
+                  }`}
+                >
+                  I have a credential
+                </button>
+                <button
+                  onClick={() => { setCredentialMode('issue'); setError(null); }}
+                  disabled={isLoading}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    credentialMode === 'issue'
+                      ? 'bg-primary-500/20 text-primary-300 border border-primary-500/40'
+                      : 'text-dark-400 hover:text-dark-200'
+                  }`}
+                >
+                  Issue a new credential
+                </button>
+              </div>
 
-              {availableRoles && availableRoles.length > 0 && (
-                <div className="space-y-2">
-                  {availableRoles.map((r) => (
-                    <button
-                      key={r.role}
-                      onClick={() => setSelectedRole(r.role)}
-                      className={`w-full px-4 py-3 rounded-lg border text-left transition-colors ${
-                        selectedRole === r.role
-                          ? 'border-primary-500 bg-primary-500/10 text-white'
-                          : 'border-dark-700 bg-dark-800 text-dark-300 hover:border-dark-600'
-                      }`}
-                    >
-                      <span className="font-medium">{r.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              {credentialMode === 'present' ? (
+                <>
+                  <p className="text-sm text-dark-400">
+                    Select a role and present your credential from your Veridian wallet.
+                  </p>
 
-              <Button
-                variant="primary"
-                className="w-full"
-                onClick={handlePresentCredential}
-                isLoading={isLoading}
-                disabled={!selectedRole || isLoading}
-              >
-                {isLoading ? 'Waiting for wallet...' : 'Request Credential Presentation'}
-              </Button>
+                  {availableRoles && availableRoles.length > 0 && (
+                    <div className="space-y-2">
+                      {availableRoles.map((r) => (
+                        <button
+                          key={r.role}
+                          onClick={() => setSelectedRole(r.role)}
+                          className={`w-full px-4 py-3 rounded-lg border text-left transition-colors ${
+                            selectedRole === r.role
+                              ? 'border-primary-500 bg-primary-500/10 text-white'
+                              : 'border-dark-700 bg-dark-800 text-dark-300 hover:border-dark-600'
+                          }`}
+                        >
+                          <span className="font-medium">{r.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-              {isLoading && (
-                <Button variant="ghost" className="w-full" onClick={() => cancelPresentation(sessionIdRef.current)}>
-                  Cancel
-                </Button>
+                  <Button
+                    variant="primary"
+                    className="w-full"
+                    onClick={handlePresentCredential}
+                    isLoading={isLoading}
+                    disabled={!selectedRole || isLoading}
+                  >
+                    {isLoading ? 'Waiting for wallet...' : 'Request Credential Presentation'}
+                  </Button>
+
+                  {isLoading && (
+                    <Button variant="ghost" className="w-full" onClick={() => cancelPresentation(sessionIdRef.current)}>
+                      Cancel
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-dark-400">
+                    Don&apos;t have a credential yet? Provide your details and we&apos;ll issue one to your Veridian wallet.
+                    Accept the offer in the wallet when prompted.
+                  </p>
+
+                  <div className="space-y-3">
+                    <Input
+                      label="First name"
+                      value={issueFirstName}
+                      onChange={(e) => setIssueFirstName(e.target.value)}
+                      placeholder="Jane"
+                      disabled={isLoading}
+                    />
+                    <Input
+                      label="Last name"
+                      value={issueLastName}
+                      onChange={(e) => setIssueLastName(e.target.value)}
+                      placeholder="Doe"
+                      disabled={isLoading}
+                    />
+                    <Input
+                      label="Email"
+                      type="email"
+                      value={issueEmail}
+                      onChange={(e) => setIssueEmail(e.target.value)}
+                      placeholder="jane@example.com"
+                      disabled={isLoading}
+                    />
+                  </div>
+
+                  <Button
+                    variant="primary"
+                    className="w-full"
+                    onClick={handleIssueCredential}
+                    isLoading={isLoading}
+                    disabled={
+                      isLoading ||
+                      !issueFirstName.trim() ||
+                      !issueLastName.trim() ||
+                      !issueEmail.trim()
+                    }
+                  >
+                    {isLoading ? 'Issuing credential...' : 'Issue Credential'}
+                  </Button>
+                </>
               )}
             </>
           ) : (
