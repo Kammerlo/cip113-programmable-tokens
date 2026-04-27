@@ -12,6 +12,7 @@ import org.cardanofoundation.cip113.model.*;
 import org.cardanofoundation.cip113.model.keri.*;
 import org.cardanofoundation.cip113.repository.KycSessionRepository;
 import org.cardanofoundation.cip113.service.KycProofService;
+import org.cardanofoundation.cip113.util.CESRStreamUtil;
 import org.cardanofoundation.cip113.util.IpexNotificationHelper;
 import org.cardanofoundation.signify.app.Exchanging;
 import org.cardanofoundation.signify.app.clienting.SignifyClient;
@@ -24,11 +25,13 @@ import org.cardanofoundation.signify.app.credentialing.ipex.IpexApplyArgs;
 import org.cardanofoundation.signify.app.credentialing.ipex.IpexGrantArgs;
 import org.cardanofoundation.signify.app.credentialing.registries.CreateRegistryArgs;
 import org.cardanofoundation.signify.app.credentialing.registries.RegistryResult;
-import org.cardanofoundation.signify.cesr.Serder;
-import org.cardanofoundation.signify.cesr.util.CESRStreamUtil;
-import org.cardanofoundation.signify.cesr.util.CESRStreamUtil;
 import org.cardanofoundation.signify.cesr.util.Utils;
-import org.cardanofoundation.signify.core.States;
+import org.cardanofoundation.signify.generated.keria.model.Credential;
+import org.cardanofoundation.signify.generated.keria.model.ExchangeResource;
+import org.cardanofoundation.signify.generated.keria.model.HabState;
+import org.cardanofoundation.signify.generated.keria.model.KeyStateRecord;
+import org.cardanofoundation.signify.generated.keria.model.OOBI;
+import org.cardanofoundation.signify.generated.keria.model.Registry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
@@ -56,7 +59,6 @@ public class KeriController {
     private final KycProofService kycProofService;
     private final SchemaConfig schemaConfig;
     private final ObjectMapper objectMapper;
-    private final org.cardanofoundation.cip113.service.AccountService accountService;
     private final com.bloxbean.cardano.client.quicktx.QuickTxBuilder quickTxBuilder;
 
     private static final Pattern OOBI_AID_PATTERN = Pattern.compile("/oobi/([^/]+)");
@@ -103,18 +105,15 @@ public class KeriController {
     @GetMapping("/oobi")
     public ResponseEntity<OobiResponse> getOobi(
             @RequestHeader(value = "X-Session-Id", required = false) String sessionId) throws Exception {
-        Optional<Object> o = client.oobis().get(identifierConfig.getName(), null);
+        Optional<OOBI> o = client.oobis().get(identifierConfig.getName(), null);
         if (o.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
-        @SuppressWarnings("unchecked")
-        Map<String, Object> oobiMap = (Map<String, Object>) o.get();
-        @SuppressWarnings("unchecked")
-        List<String> oobis = (List<String>) oobiMap.get("oobis");
+        List<String> oobis = o.get().getOobis();
         if (oobis == null || oobis.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.ok(new OobiResponse(oobis.getFirst()));
+        return ResponseEntity.ok(new OobiResponse(oobis.get(0)));
     }
 
     @GetMapping("/oobi/resolve")
@@ -231,11 +230,9 @@ public class KeriController {
             IpexNotificationHelper.Notification offerNote =
                     IpexNotificationHelper.waitForNotification(client, "/exn/ipex/offer");
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> offerExn = (Map<String, Object>)
-                    ((LinkedHashMap<String, Object>) client.exchanges().get(offerNote.a.d).get()).get("exn");
-
-            String offerSaid = offerExn.get("d").toString();
+            ExchangeResource offerResource = client.exchanges().get(offerNote.a.d)
+                    .orElseThrow(() -> new IllegalStateException("Offer exchange not found: " + offerNote.a.d));
+            String offerSaid = offerResource.getExn().getD();
             IpexNotificationHelper.markAndDelete(client, offerNote);
 
             // Step 3: Send /ipex/agree
@@ -254,14 +251,13 @@ public class KeriController {
             IpexNotificationHelper.Notification grantNote =
                     IpexNotificationHelper.waitForNotification(client, "/exn/ipex/grant");
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> grantExn = (Map<String, Object>)
-                    ((Map<String, Object>) client.exchanges().get(grantNote.a.d).get()).get("exn");
+            ExchangeResource grantResource = client.exchanges().get(grantNote.a.d)
+                    .orElseThrow(() -> new IllegalStateException("Grant exchange not found: " + grantNote.a.d));
 
             IpexAdmitArgs admitArgs = IpexAdmitArgs.builder()
                     .senderName(identifierName)
                     .recipient(aid)
-                    .grantSaid(grantExn.get("d").toString())
+                    .grantSaid(grantResource.getExn().getD())
                     .datetime(KERI_DATETIME.format(LocalDateTime.now(ZoneOffset.UTC)))
                     .message("")
                     .build();
@@ -273,8 +269,7 @@ public class KeriController {
 
             // Extract ACDC attributes
             @SuppressWarnings("unchecked")
-            Map<String, Object> acdc = (Map<String, Object>)
-                    ((Map<String, Object>) grantExn.get("e")).get("acdc");
+            Map<String, Object> acdc = (Map<String, Object>) grantResource.getExn().getE().get("acdc");
             @SuppressWarnings("unchecked")
             Map<String, Object> rawAttributes = (Map<String, Object>) acdc.get("a");
             Map<String, Object> userAttributes = new LinkedHashMap<>(rawAttributes);
@@ -380,28 +375,21 @@ public class KeriController {
             String credentialSaid = issueResult.getAcdc().getKed().get("d").toString();
             log.info("Issued credential SAID={} for session={}", credentialSaid, sessionId);
 
-            @SuppressWarnings("unchecked")
-            LinkedHashMap<String, Object> credentialMap = (LinkedHashMap<String, Object>)
-                    client.credentials().get(credentialSaid, false)
-                            .orElseThrow(() -> new IllegalStateException("Issued credential not found: " + credentialSaid));
+            // Re-fetch the credential to obtain the anc attachment, which IssueCredentialResult
+            // does not expose. Pass includeCESR=true so KERIA returns the CESR-encoded ancatc list.
+            Credential issuedCredential = client.credentials().get(credentialSaid, true)
+                    .orElseThrow(() -> new IllegalStateException("Issued credential not found: " + credentialSaid));
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> sad = (Map<String, Object>) credentialMap.get("sad");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> anc = (Map<String, Object>) credentialMap.get("anc");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> iss = (Map<String, Object>) credentialMap.get("iss");
-            @SuppressWarnings("unchecked")
-            List<String> ancatc = (List<String>) credentialMap.get("ancatc");
+            List<String> ancatc = issuedCredential.getAncatc();
             String ancAttachment = (ancatc != null && !ancatc.isEmpty()) ? ancatc.getFirst() : null;
 
             IpexGrantArgs grantArgs = IpexGrantArgs.builder()
                     .senderName(identifierName)
                     .recipient(walletAid)
                     .datetime(KERI_DATETIME.format(LocalDateTime.now(ZoneOffset.UTC)))
-                    .acdc(new Serder(sad))
-                    .iss(new Serder(iss))
-                    .anc(new Serder(anc))
+                    .acdc(issueResult.getAcdc())
+                    .iss(issueResult.getIss())
+                    .anc(issueResult.getAnc())
                     .ancAttachment(ancAttachment)
                     .build();
             Exchanging.ExchangeMessageResult grantResult = grantCredential(grantArgs,
@@ -545,13 +533,12 @@ public class KeriController {
         try {
             // Fetch full CESR credential chain
             String credentialSaid = kyc.getCredentialAid();
-            
-            Optional<String> cesrOpt = client.credentials().getCESR(credentialSaid);
-            if (cesrOpt.isEmpty()) {
+
+            String cesrChain = fetchCredentialCesrChain(credentialSaid);
+            if (cesrChain == null) {
                 return ResponseEntity.badRequest().body(
                         Map.of("error", "Credential chain not found for SAID: " + credentialSaid));
             }
-            String cesrChain = cesrOpt.get();
             List<Map<String, Object>> cesrData = CESRStreamUtil.parseCESRData(cesrChain);
             String strippedCesrChain = strip(cesrData);
             byte[][] chunks = splitIntoChunks(strippedCesrChain.getBytes(), 64);
@@ -610,6 +597,7 @@ public class KeriController {
         return chunks;
     }
 
+    @SuppressWarnings("unchecked")
     private String strip(List<Map<String, Object>> cesrData) {
         List<Map<String, Object>> allVcpEvents = new ArrayList<>();
         List<String> allVcpAttachments = new ArrayList<>();
@@ -716,21 +704,17 @@ public class KeriController {
             // Query user's key state to get the new sequence number after the interact event.
             // signify-java's query signature is (pre, sn) — the second arg is an OPTIONAL hex
             // sequence-number string; passing the AID there makes KERIA do `int(aid, 16)` and
-            // crash. Use null for "latest state". Also, KERIA's /states?pre=X returns a LIST
-            // of key-state dicts — coerceKeyState handles both list and bare-map shapes.
+            // crash. Use null for "latest state".
             String seqNumber = "<unknown>";
             Thread.sleep(2000); // let the new ixn settle in KERIA before querying
             for (int attempt = 1; attempt <= 5; attempt++) {
                 try {
                     Object queryOp = client.keyStates().query(userAid, null);
                     client.operations().wait(Operation.fromObject(queryOp));
-                    Optional<Object> raw = client.keyStates().get(userAid);
-                    if (raw.isPresent()) {
-                        Map<String, Object> ks = coerceKeyState(raw.get());
-                        if (ks != null && ks.get("s") != null) {
-                            seqNumber = ks.get("s").toString();
-                            break;
-                        }
+                    Optional<KeyStateRecord> raw = client.keyStates().get(userAid);
+                    if (raw.isPresent() && raw.get().getS() != null) {
+                        seqNumber = raw.get().getS();
+                        break;
                     }
                     log.info("Key state for {} not available yet (attempt {}/5)", userAid, attempt);
                 } catch (Exception ex) {
@@ -775,12 +759,10 @@ public class KeriController {
         return Map.of();
     }
 
-    @SuppressWarnings("unchecked")
     private String getOrCreateRegistrySaid() throws Exception {
-        List<Map<String, Object>> registries =
-                (List<Map<String, Object>>) client.registries().list(identifierName);
+        List<Registry> registries = client.registries().list(identifierName);
         if (registries != null && !registries.isEmpty()) {
-            return registries.getFirst().get("regk").toString();
+            return registries.getFirst().getRegk();
         }
         log.info("No credential registry found, creating '{}'", registryName);
         CreateRegistryArgs args = CreateRegistryArgs.builder()
@@ -795,10 +777,26 @@ public class KeriController {
         return result.getRegser().getPre();
     }
 
+    /**
+     * Retrieves the credential together with its full CESR chain (vcp + iss + acdc events with
+     * attachments). The signify-java client's typed {@code Credential} model only exposes the
+     * issuance and anchor events, but CIP-170 AUTH_BEGIN requires the registry inception event
+     * too — so we hit KERIA directly with {@code Accept: application/json+cesr} like the old
+     * {@code credentials().getCESR()} helper did.
+     */
+    private String fetchCredentialCesrChain(String credentialSaid) throws Exception {
+        var response = client.fetch("/credentials/" + credentialSaid, "GET", null,
+                Map.of("Accept", "application/json+cesr"));
+        if (response.statusCode() == java.net.HttpURLConnection.HTTP_NOT_FOUND) {
+            return null;
+        }
+        return response.body();
+    }
+
     private Exchanging.ExchangeMessageResult grantCredential(IpexGrantArgs args,
                                                               String schemaUrl,
                                                               String schemaSAID) throws Exception {
-        States.HabState hab = client.identifiers().get(args.getSenderName())
+        HabState hab = client.identifiers().get(args.getSenderName())
                 .orElseThrow(() -> new IllegalArgumentException("Identifier not found: " + args.getSenderName()));
 
         if (args.getAncAttachment() == null) {
@@ -823,21 +821,5 @@ public class KeriController {
         return client.exchanges().createExchangeMessage(
                 hab, "/ipex/grant", data, embeds,
                 args.getRecipient(), args.getDatetime(), args.getAgreeSaid());
-    }
-
-    /**
-     * KERIA's /states?pre=X returns a LIST of key-state dicts. Some signify-java
-     * versions / single-result paths return a bare map. Handle both.
-     */
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> coerceKeyState(Object raw) {
-        if (raw instanceof Map) return (Map<String, Object>) raw;
-        if (raw instanceof List) {
-            List<Object> list = (List<Object>) raw;
-            if (!list.isEmpty() && list.get(0) instanceof Map) {
-                return (Map<String, Object>) list.get(0);
-            }
-        }
-        return null;
     }
 }

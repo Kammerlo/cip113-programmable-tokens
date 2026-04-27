@@ -17,8 +17,8 @@ import org.cardanofoundation.signify.app.aiding.EventResult;
 import org.cardanofoundation.signify.app.clienting.SignifyClient;
 import org.cardanofoundation.signify.app.coring.Coring;
 import org.cardanofoundation.signify.app.coring.Operation;
-import org.cardanofoundation.signify.cesr.Salter;
-import org.cardanofoundation.signify.core.States;
+import org.cardanofoundation.signify.generated.keria.model.HabState;
+import org.cardanofoundation.signify.generated.keria.model.Tier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -39,7 +39,7 @@ public class KeriConfig {
                                        @Value("${keri.identifier.bran}") String bran,
                                        @Value("${keri.booturl}") String bootUrl,
                                        SchemaConfig schemaConfig) throws Exception {
-        SignifyClient client = new SignifyClient(url, bran, Salter.Tier.low, bootUrl, null);
+        SignifyClient client = new SignifyClient(url, bran, Tier.LOW, bootUrl, null);
         try {
             client.connect();
         } catch (Exception e) {
@@ -64,7 +64,7 @@ public class KeriConfig {
             SignifyClient client) throws Exception {
         String prefix;
 
-        Optional<States.HabState> habState = client.identifiers().get(identifierName);
+        Optional<HabState> habState = client.identifiers().get(identifierName);
         if (habState.isPresent()) {
             prefix = habState.get().getPrefix();
         } else {
@@ -93,7 +93,7 @@ public class KeriConfig {
         kArgs.setToad(availableWitnesses.toad());
         kArgs.setWits(witnessIds);
 
-        Optional<States.HabState> optionalIdentifier = client.identifiers().get(name);
+        Optional<HabState> optionalIdentifier = client.identifiers().get(name);
         if (optionalIdentifier.isPresent()) {
             id = optionalIdentifier.get().getPrefix();
         } else {

@@ -54,7 +54,7 @@ dependencies {
 
     implementation('com.easy1staking:cardano-client-lib-extensions:0.0.4')
 
-	implementation 'org.cardanofoundation:signify:0.1.2-PR62-d6aea58'
+	implementation 'org.cardanofoundation:signify:0.1.2-71dbd8d-SNAPSHOT'
 
 	implementation 'io.micrometer:micrometer-registry-prometheus:latest.release'
 
