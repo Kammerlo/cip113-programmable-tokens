@@ -21,7 +21,6 @@ import org.cardanofoundation.signify.app.credentialing.credentials.CredentialDat
 import org.cardanofoundation.signify.app.credentialing.credentials.IssueCredentialResult;
 import org.cardanofoundation.signify.app.credentialing.ipex.IpexAdmitArgs;
 import org.cardanofoundation.signify.app.credentialing.ipex.IpexAgreeArgs;
-import org.cardanofoundation.signify.app.credentialing.ipex.IpexApplyArgs;
 import org.cardanofoundation.signify.app.credentialing.ipex.IpexGrantArgs;
 import org.cardanofoundation.signify.app.credentialing.registries.CreateRegistryArgs;
 import org.cardanofoundation.signify.app.credentialing.registries.RegistryResult;
@@ -62,8 +61,8 @@ public class KeriController {
     private final com.bloxbean.cardano.client.quicktx.QuickTxBuilder quickTxBuilder;
 
     private static final Pattern OOBI_AID_PATTERN = Pattern.compile("/oobi/([^/]+)");
-    private static final DateTimeFormatter KERI_DATETIME =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS'+00:00'");
+    private static final DateTimeFormatter KERI_DATETIME = DateTimeFormatter
+            .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS'+00:00'");
 
     @Value("${keri.identifier.name}")
     private String identifierName;
@@ -175,8 +174,7 @@ public class KeriController {
                 roles.add(Map.of(
                         "role", entry.getKey(),
                         "roleValue", role.getValue(),
-                        "label", entry.getValue().getLabel()
-                ));
+                        "label", entry.getValue().getLabel()));
             } catch (IllegalArgumentException e) {
                 log.warn("Unknown role name in schema config: {}", entry.getKey());
             }
@@ -212,23 +210,35 @@ public class KeriController {
 
         activePresentations.put(sessionId, Thread.currentThread());
         try {
-            // Step 1: Send /ipex/apply
-            IpexApplyArgs applyArgs = IpexApplyArgs.builder()
-                    .recipient(aid)
-                    .senderName(identifierName)
-                    .schemaSaid(schemaEntry.getSaid())
-                    .attributes(Map.of("oobiUrl", schemaConfig.getBaseUrl()))
-                    .datetime(KERI_DATETIME.format(LocalDateTime.now(ZoneOffset.UTC)))
-                    .build();
-            Exchanging.ExchangeMessageResult applyResult = client.ipex().apply(applyArgs);
+            // Build /ipex/apply directly via createExchangeMessage so oobiUrl lands at
+            // exn.a.oobiUrl (where the wallet's getInlineSchemaOobiBase reads it).
+            // signify-java's IpexApplyArgs would nest it under exn.a.a, which the wallet
+            // treats as a credential filter attribute and silently drops.
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("m", "");
+            data.put("s", schemaEntry.getSaid());
+            data.put("a", new LinkedHashMap<>());
+            data.put("oobiUrl", schemaConfig.getBaseUrl());
+            HabState hab = this.client.identifiers().get(identifierName)
+                    .orElseThrow(() -> new IllegalArgumentException("Identifier not found: " + identifierName));
+            Exchanging.ExchangeMessageResult applyResult = this.client
+                    .exchanges()
+                    .createExchangeMessage(
+                            hab,
+                            "/ipex/apply",
+                            data,
+                            new LinkedHashMap<>(),
+                            aid,
+                            KERI_DATETIME.format(LocalDateTime.now(ZoneOffset.UTC)),
+                            null);
             Object applyOp = client.ipex().submitApply(identifierName, applyResult.exn(),
                     applyResult.sigs(), Collections.singletonList(aid));
             client.operations().wait(Operation.fromObject(applyOp));
 
             // Step 2: Wait for /ipex/offer
             log.info("Waiting for wallet to respond with an offer...");
-            IpexNotificationHelper.Notification offerNote =
-                    IpexNotificationHelper.waitForNotification(client, "/exn/ipex/offer");
+            IpexNotificationHelper.Notification offerNote = IpexNotificationHelper.waitForNotification(client,
+                    "/exn/ipex/offer");
 
             ExchangeResource offerResource = client.exchanges().get(offerNote.a.d)
                     .orElseThrow(() -> new IllegalStateException("Offer exchange not found: " + offerNote.a.d));
@@ -248,8 +258,8 @@ public class KeriController {
             client.operations().wait(Operation.fromObject(agreeOp));
 
             // Step 4: Wait for /ipex/grant
-            IpexNotificationHelper.Notification grantNote =
-                    IpexNotificationHelper.waitForNotification(client, "/exn/ipex/grant");
+            IpexNotificationHelper.Notification grantNote = IpexNotificationHelper.waitForNotification(client,
+                    "/exn/ipex/grant");
 
             ExchangeResource grantResource = client.exchanges().get(grantNote.a.d)
                     .orElseThrow(() -> new IllegalStateException("Grant exchange not found: " + grantNote.a.d));
@@ -375,8 +385,10 @@ public class KeriController {
             String credentialSaid = issueResult.getAcdc().getKed().get("d").toString();
             log.info("Issued credential SAID={} for session={}", credentialSaid, sessionId);
 
-            // Re-fetch the credential to obtain the anc attachment, which IssueCredentialResult
-            // does not expose. Pass includeCESR=true so KERIA returns the CESR-encoded ancatc list.
+            // Re-fetch the credential to obtain the anc attachment, which
+            // IssueCredentialResult
+            // does not expose. Pass includeCESR=true so KERIA returns the CESR-encoded
+            // ancatc list.
             Credential issuedCredential = client.credentials().get(credentialSaid, true)
                     .orElseThrow(() -> new IllegalStateException("Issued credential not found: " + credentialSaid));
 
@@ -398,7 +410,16 @@ public class KeriController {
                     grantResult.sigs(), grantResult.atc(), Collections.singletonList(walletAid));
             client.operations().wait(Operation.fromObject(grantOp));
 
-            log.info("IPEX grant submitted for credential SAID={}", credentialSaid);
+            log.info("IPEX grant submitted for credential SAID={}, waiting for wallet admit...",
+                    credentialSaid);
+
+            // submitGrant only confirms KERIA queued the message; the wallet still has to
+            // surface the credential and send back /ipex/admit once the user accepts.
+            IpexNotificationHelper.Notification admitNote = IpexNotificationHelper.waitForNotification(
+                    client, "/exn/ipex/admit");
+            IpexNotificationHelper.markAndDelete(client, admitNote);
+
+            log.info("Wallet admitted credential SAID={}", credentialSaid);
 
             kycEntity.setCredentialAid(credentialSaid);
             kycEntity.setCredentialSaid(schemaEntry.getSaid());
@@ -413,6 +434,16 @@ public class KeriController {
             return ResponseEntity.ok(new CredentialResponse(role.name(), role.getValue(),
                     schemaEntry.getLabel(), additionalProps));
 
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ResponseEntity.status(409).body(Map.of("error", "Issuance cancelled."));
+        } catch (RuntimeException e) {
+            if (e.getMessage() != null && e.getMessage().startsWith("Timed out")) {
+                return ResponseEntity.status(408).body(
+                        Map.of("error", "Wallet did not admit the credential in time."));
+            }
+            log.error("credential/issue failed", e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             log.error("credential/issue failed", e);
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
@@ -584,6 +615,7 @@ public class KeriController {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
+
     private byte[][] splitIntoChunks(byte[] data, int chunkSize) {
         int numChunks = (data.length + chunkSize - 1) / chunkSize;
         byte[][] chunks = new byte[numChunks][];
@@ -666,11 +698,14 @@ public class KeriController {
         try {
             // Build payload and compute SAID.
             // CRITICAL: signify-java's createExchangeMessage (Exchanging.java:228) does
-            // `attrs.put("i", recipient); attrs.putAll(payload)` BEFORE the wire send. If we
-            // omit `i` from the payload here, our pre-computed SAID is for {d, unit, quantity}
+            // `attrs.put("i", recipient); attrs.putAll(payload)` BEFORE the wire send. If
+            // we
+            // omit `i` from the payload here, our pre-computed SAID is for {d, unit,
+            // quantity}
             // but the SAID Veridian recomputes is for {i, d, unit, quantity} → mismatch →
             // wallet's processRemoteSignReq calls markNotification and silently drops the
-            // request without surfacing UI. Inserting `i` first ourselves keeps the SAIDs in sync.
+            // request without surfacing UI. Inserting `i` first ourselves keeps the SAIDs
+            // in sync.
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("i", userAid);
             payload.put("d", "");
@@ -696,14 +731,16 @@ public class KeriController {
             // Wait for the wallet to respond on /remotesign/ixn/ref. KERIA prefixes inbound
             // exn routes with "/exn/" when surfacing them as notifications, so we have to
             // accept both "/remotesign/ixn/ref" and "/exn/remotesign/ixn/ref".
-            IpexNotificationHelper.Notification refNote =
-                    IpexNotificationHelper.waitForNotification(client,
-                            "/remotesign/ixn/ref", "/exn/remotesign/ixn/ref");
+            IpexNotificationHelper.Notification refNote = IpexNotificationHelper.waitForNotification(client,
+                    "/remotesign/ixn/ref", "/exn/remotesign/ixn/ref");
             IpexNotificationHelper.markAndDelete(client, refNote);
 
-            // Query user's key state to get the new sequence number after the interact event.
-            // signify-java's query signature is (pre, sn) — the second arg is an OPTIONAL hex
-            // sequence-number string; passing the AID there makes KERIA do `int(aid, 16)` and
+            // Query user's key state to get the new sequence number after the interact
+            // event.
+            // signify-java's query signature is (pre, sn) — the second arg is an OPTIONAL
+            // hex
+            // sequence-number string; passing the AID there makes KERIA do `int(aid, 16)`
+            // and
             // crash. Use null for "latest state".
             String seqNumber = "<unknown>";
             Thread.sleep(2000); // let the new ixn settle in KERIA before querying
@@ -778,10 +815,14 @@ public class KeriController {
     }
 
     /**
-     * Retrieves the credential together with its full CESR chain (vcp + iss + acdc events with
-     * attachments). The signify-java client's typed {@code Credential} model only exposes the
-     * issuance and anchor events, but CIP-170 AUTH_BEGIN requires the registry inception event
-     * too — so we hit KERIA directly with {@code Accept: application/json+cesr} like the old
+     * Retrieves the credential together with its full CESR chain (vcp + iss + acdc
+     * events with
+     * attachments). The signify-java client's typed {@code Credential} model only
+     * exposes the
+     * issuance and anchor events, but CIP-170 AUTH_BEGIN requires the registry
+     * inception event
+     * too — so we hit KERIA directly with {@code Accept: application/json+cesr}
+     * like the old
      * {@code credentials().getCESR()} helper did.
      */
     private String fetchCredentialCesrChain(String credentialSaid) throws Exception {
@@ -794,14 +835,10 @@ public class KeriController {
     }
 
     private Exchanging.ExchangeMessageResult grantCredential(IpexGrantArgs args,
-                                                              String schemaUrl,
-                                                              String schemaSAID) throws Exception {
+            String schemaUrl,
+            String schemaSAID) throws Exception {
         HabState hab = client.identifiers().get(args.getSenderName())
                 .orElseThrow(() -> new IllegalArgumentException("Identifier not found: " + args.getSenderName()));
-
-        if (args.getAncAttachment() == null) {
-            throw new IllegalStateException("ancatc is missing from credential — was the issuance operation fully confirmed?");
-        }
 
         String acdcAtc = new String(Utils.serializeACDCAttachment(args.getIss()));
         String issAtc = new String(Utils.serializeIssExnAttachment(args.getAnc()));
@@ -814,9 +851,8 @@ public class KeriController {
 
         Map<String, Object> data = Map.of(
                 "m", args.getMessage() != null ? args.getMessage() : "",
-                "a", Map.of("oobiUrl", schemaUrl),
-                "s", schemaSAID
-        );
+                "s", schemaSAID,
+                "oobiUrl", schemaUrl);
 
         return client.exchanges().createExchangeMessage(
                 hab, "/ipex/grant", data, embeds,
